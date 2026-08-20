@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# System
+.DS_Store
+*.log
