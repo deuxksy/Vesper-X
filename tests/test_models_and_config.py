@@ -26,7 +26,25 @@ def test_load_default_config(tmp_path, monkeypatch):
 def test_load_config_file_not_found(tmp_path, monkeypatch):
     non_existent = tmp_path / "non_existent.toml"
     monkeypatch.setattr("vesper_x.config.DEFAULT_CONFIG_PATH", non_existent)
-    
+
     cfg = load_config()
     assert cfg.aria2_host == "ws://heritage.bun-bull.ts.net:6800"
     assert "幼水铃衣" in cfg.models
+
+
+def test_load_config_network_proxy(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[network]\nproxy = "http://127.0.0.1:7890"\n')
+    monkeypatch.setattr("vesper_x.config.DEFAULT_CONFIG_PATH", config_file)
+
+    cfg = load_config()
+    assert cfg.proxy == "http://127.0.0.1:7890"
+
+
+def test_load_config_network_proxy_default_none(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[aria2]\nhost = "ws://example:6800"\n')
+    monkeypatch.setattr("vesper_x.config.DEFAULT_CONFIG_PATH", config_file)
+
+    cfg = load_config()
+    assert cfg.proxy is None

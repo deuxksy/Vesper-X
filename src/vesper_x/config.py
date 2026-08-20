@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 try:
     import tomllib
 except ImportError:
@@ -14,6 +15,7 @@ class AppConfig:
     aria2_host: str = "ws://heritage.bun-bull.ts.net:6800"
     aria2_secret: str = ""
     models: list[str] = field(default_factory=lambda: list(DEFAULT_MODELS))
+    proxy: Optional[str] = None
 
 
 def load_config() -> AppConfig:
@@ -23,9 +25,11 @@ def load_config() -> AppConfig:
         data = tomllib.load(f)
     aria2_data = data.get("aria2", {})
     crawler_data = data.get("crawler", {})
+    network_data = data.get("network", {})
     models = crawler_data.get("models", list(DEFAULT_MODELS))
     return AppConfig(
         aria2_host=aria2_data.get("host", "ws://heritage.bun-bull.ts.net:6800"),
         aria2_secret=aria2_data.get("secret", ""),
         models=models,
+        proxy=network_data.get("proxy"),
     )

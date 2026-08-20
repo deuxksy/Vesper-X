@@ -1,6 +1,9 @@
 import asyncio
 import json
 import re
+import time
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +19,7 @@ from vesper_x.extractors.cosplaytele import CosplayteleParser, CosplayteleCrawle
 from vesper_x.extractors.mediafire import MediafireResolver
 from vesper_x.extractors.misskon import MisskonParser
 from vesper_x.extractors.ouo import OuoBypasser
+from vesper_x.fetchers import BrowserFetcher
 from vesper_x.models import DownloadMetadata
 
 try:
@@ -70,14 +74,23 @@ def extract_models_from_tags_and_html(tags: list[str], html_content: str, post_u
     return models
 
 
-def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag: Optional[str] = None) -> list[DownloadMetadata]:
+def run_async(coro):
+    """Playwright sync 세션 중에는 main thread에 running loop가 남아 asyncio.run()이 실패한다 - worker thread에서 실행."""
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(asyncio.run, coro).result()
+
+
+def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag: Optional[str] = None, fetcher: Optional[BrowserFetcher] = None) -> list[DownloadMetadata]:
     if config is None:
         config = load_config()
 
     headers = {"User-Agent": DEFAULT_USER_AGENT}
     try:
-        resp = httpx.get(post_url, headers=headers, follow_redirects=True, timeout=30.0)
-        html_content = resp.text
+        if fetcher is not None:
+            html_content = fetcher.fetch(post_url)
+        else:
+            resp = httpx.get(post_url, headers=headers, follow_redirects=True, timeout=30.0)
+            html_content = resp.text
     except Exception as e:
         console.print(f"[bold red]Failed to fetch post URL {post_url}: {e}[/bold red]")
         return []
@@ -105,11 +118,23 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
     for link in links:
         current_url = link
         if "ouo.io" in current_url or "ouo.press" in current_url:
-            try:
-                current_url = asyncio.run(ouo_bypasser.resolve(current_url))
-            except Exception as e:
-                console.print(f"[bold red]Failed to bypass shortener link {link}: {e}[/bold red]")
+            # ouo는 연속 요청 시 throttling 한다 - backoff 재시도
+            bypassed = None
+            for attempt in range(3):
+                try:
+                    bypassed = run_async(ouo_bypasser.resolve(current_url))
+                except Exception as e:
+                    console.print(f"[bold red]Failed to bypass shortener link {link}: {e}[/bold red]")
+                    break
+                # ouo 우회는 간헐 실패 시 입력 URL을 그대로 반환한다
+                if "ouo.io" not in bypassed and "ouo.press" not in bypassed:
+                    break
+                if attempt < 2:
+                    time.sleep(8 * (attempt + 1))
+            if bypassed is None or "ouo.io" in bypassed or "ouo.press" in bypassed:
+                console.print(f"[yellow]Bypass failed after retry, skipping: {link}[/yellow]")
                 continue
+            current_url = bypassed
 
         direct_url = current_url
         if "mediafire.com" in current_url:
@@ -132,6 +157,9 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
         filename = direct_url.split("/")[-1].split("?")[0] if "/" in direct_url else None
         if not filename or filename == direct_url:
             filename = None
+        else:
+            # mediafire direct URL의 filename은 percent-encoding + '+'(space) 그대로 aria2에 전달된다
+            filename = urllib.parse.unquote(filename).replace("+", " ")
 
         meta = DownloadMetadata(
             direct_url=direct_url,
@@ -253,8 +281,9 @@ def crawl(
     output: Optional[str] = typer.Option(None, "-o", "--output", help="Save extracted URLs to file"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON format"),
 ):
-    """Crawl category or tag listing across multiple pages and process all posts."""
-    headers = {"User-Agent": DEFAULT_USER_AGENT}
+    """Crawl category or tag listing across multiple pages and process all posts.
+
+    페이지를 페치할 때마다 해당 post를 즉시 resolve+dispatch 한다 (최신 페이지 우선, 스트리밍)."""
     if "cosplaytele.com" in url:
         crawler = CosplayteleCrawler()
     else:
@@ -263,48 +292,60 @@ def crawl(
     tag_match = re.search(r"/(?:tag|category)/([^/]+)/", url)
     tag_slug = tag_match.group(1) if tag_match else None
 
-    visited_pages = set()
-    to_visit = [url]
-    all_post_urls: list[str] = []
-
-    page_count = 0
-    while to_visit:
-        if pages > 0 and page_count >= pages:
-            break
-        current_page_url = to_visit.pop(0)
-        if current_page_url in visited_pages:
-            continue
-        visited_pages.add(current_page_url)
-        page_count += 1
-
-        try:
-            resp = httpx.get(current_page_url, headers=headers, follow_redirects=True, timeout=30.0)
-            page_html = resp.text
-        except Exception as e:
-            console.print(f"[bold red]Failed to fetch category page {current_page_url}: {e}[/bold red]")
-            continue
-
-        posts = crawler.extract_post_urls(page_html)
-        for post in posts:
-            if post not in all_post_urls:
-                all_post_urls.append(post)
-                if limit > 0 and len(all_post_urls) >= limit:
-                    break
-        if limit > 0 and len(all_post_urls) >= limit:
-            break
-
-        pagination_pages = crawler.extract_pagination_urls(page_html)
-        for p in pagination_pages:
-            if p not in visited_pages and p not in to_visit:
-                to_visit.append(p)
-
     config = load_config()
-    all_metadata: list[DownloadMetadata] = []
-    for post_url in all_post_urls:
-        metadata = resolve_post(post_url, config=config, current_tag=tag_slug)
-        all_metadata.extend(metadata)
+    dispatcher = None if extract_only else Aria2Dispatcher(config)
 
-    handle_results(all_metadata, extract_only=extract_only, output=output, copy=False, json_output=json_output, config=config)
+    visited_pages = set()
+    visited_posts: set[str] = set()
+    to_visit = [url]
+    all_metadata: list[DownloadMetadata] = []
+
+    with BrowserFetcher(proxy=config.proxy) as fetcher:
+        page_count = 0
+        post_count = 0
+        while to_visit:
+            if pages > 0 and page_count >= pages:
+                break
+            current_page_url = to_visit.pop(0)
+            if current_page_url in visited_pages:
+                continue
+            visited_pages.add(current_page_url)
+            page_count += 1
+
+            try:
+                page_html = fetcher.fetch(current_page_url)
+            except Exception as e:
+                console.print(f"[bold red]Failed to fetch category page {current_page_url}: {e}[/bold red]")
+                continue
+
+            for post_url in crawler.extract_post_urls(page_html):
+                if post_url in visited_posts:
+                    continue
+                visited_posts.add(post_url)
+                post_count += 1
+                console.print(f"[bold cyan]({post_count})[/bold cyan] {post_url}")
+
+                metadata = resolve_post(post_url, config=config, current_tag=tag_slug, fetcher=fetcher)
+                all_metadata.extend(metadata)
+
+                if dispatcher:
+                    for m in metadata:
+                        try:
+                            gid = dispatcher.dispatch(m)
+                            console.print(f"[bold green]Dispatched to aria2[/bold green] (GID: [cyan]{gid}[/cyan]) - {m.filename or m.direct_url[:60]}")
+                        except Exception as e:
+                            console.print(f"[bold red]Failed to dispatch to aria2: {e}[/bold red]")
+
+                if limit > 0 and post_count >= limit:
+                    to_visit.clear()
+                    break
+
+            for p in crawler.extract_pagination_urls(page_html):
+                if p not in visited_pages and p not in to_visit:
+                    to_visit.append(p)
+
+    # dispatch는 위에서 이미 처리 - 출력/저장만
+    handle_results(all_metadata, extract_only=True, output=output, copy=False, json_output=json_output, config=config)
 
 
 @app.command()

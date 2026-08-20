@@ -17,11 +17,12 @@ Lint 도구는 미설정. 도입 시 이 표를 갱신한다.
 
 - `src/vesper_x/cli.py` — Typer entry. parse / crawl / clip / batch
 - `src/vesper_x/extractors/` — Parser(misskon, cosplaytele) · Crawler(crawler) · Bypasser(ouo) · Resolver(mediafire)
+- `src/vesper_x/fetchers.py` — `BrowserFetcher` (Chrome ECH page fetch, `crawl`이 사용)
 - `src/vesper_x/dispatchers/aria2.py` — aria2p RPC 전송
 - `src/vesper_x/models.py` — `DownloadMetadata` 전송 단위
-- `src/vesper_x/config.py` — `~/.config/url-resolver/config.toml` 로드
+- `src/vesper_x/config.py` — `~/.config/url-resolver/config.toml` 로드 (`[network] proxy` 선택)
 
-Pipeline: CLI → Crawler → Parser → Bypasser(ouo) → Resolver(mediafire) → DownloadMetadata → Dispatcher(aria2)
+Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser(ouo) → Resolver(mediafire) → DownloadMetadata → Dispatcher(aria2)
 
 ## Conventions
 
@@ -32,5 +33,8 @@ Pipeline: CLI → Crawler → Parser → Bypasser(ouo) → Resolver(mediafire) �
 ## Gotchas
 
 - pytest `asyncio_mode = "strict"` — async test에 `@pytest.mark.asyncio` 필수
-- `OuoBypasser.resolve()`는 async — sync context에서는 `asyncio.run()` 호출
+- `OuoBypasser.resolve()`는 async — sync context에서는 `cli.run_async()` 호출. Playwright sync 세션(`BrowserFetcher` with 블록) 안에서는 main thread에 running loop가 남아 `asyncio.run()` 직접 호출 시 RuntimeError
+- misskon.com은 한국 이중 차단(ISP SNI + Cloudflare 451) — httpx/번들 Chromium 모두 실패. `BrowserFetcher`는 `channel="chrome"`(실제 Chrome) + ECH + secure DoH launch args 필수
+- ouo.io는 2단계 우회다: "I'M A HUMAN" 클릭 → `/go/` 페이지 "Get Link" 버튼(countdown 후 `disabled` 해제) 클릭 → 목적지. 버튼 활성화 대기 필수
+- ouo bypass는 간헐 실패 시 입력 URL을 그대로 반환한다 — `resolve_post`가 결과에 ouo 잔존 시 재시도 후 skip
 - aria2 host는 `ws://`로 설정해도 `Aria2Dispatcher`가 http(s)로 변환한다
