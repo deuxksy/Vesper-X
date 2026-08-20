@@ -10,8 +10,19 @@
 
 - **Post Parsing**: MissKon, CosplayTele 게시글에서 호스트 다운로드 링크 자동 추출
 - **Shortener Bypass**: `ouo.io`, `ouo.press` 등 단축링크 Playwright 기반 브라우저 우회
-- **Direct Link Extraction**: MediaFire, Mega, Gofile 등 호스팅 사이트 직링크 변환
+- **Direct Link Extraction**: MediaFire 호스트 직링크 변환 — Mega, Gofile은 추출 링크를 그대로 전달
 - **Aria2 Dispatch**: aria2 RPC 연동 전송
+
+---
+
+## 📦 설치
+
+```bash
+uv sync
+uv run playwright install chromium   # ouo 단축링크 우회용
+```
+
+요구사항: Python 3.12+, aria2 RPC daemon (`~/.config/url-resolver/config.toml`)
 
 ---
 
@@ -27,3 +38,9 @@ uv run vesper crawl "https://cosplaytele.com/category/byoru/" --pages 2 --extrac
 # 클립보드 URL 파싱
 uv run vesper clip --extract-only
 ```
+
+---
+
+## 📄 라이선스
+
+MIT
