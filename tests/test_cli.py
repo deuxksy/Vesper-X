@@ -47,6 +47,33 @@ def test_parse_command_json_output():
         assert "tags" in result.output
         assert "models" in result.output
 
+def test_resolve_post_expands_gofile_folder_links():
+    """ouo bypass가 gofile 폴더로 끝나면 파일 수만큼 metadata가 확장된다."""
+    from unittest.mock import AsyncMock
+
+    from vesper_x.extractors.gofile import GofileDownload
+
+    post_html = """
+    <html><body>
+    <a href="https://ouo.io/abc123" rel="nofollow">download</a>
+    </body></html>
+    """
+    fetcher = MagicMock()
+    fetcher.fetch.return_value = post_html
+
+    with patch("vesper_x.extractors.ouo.OuoBypasser.resolve", return_value="https://gofile.io/d/N09Oj1mA"), \
+         patch("vesper_x.extractors.gofile.GofileResolver.resolve", AsyncMock(return_value=[
+             GofileDownload("https://store3.gofile.io/download/web/id1/a%20b.rar", "a b.rar", "accountToken=tok"),
+             GofileDownload("https://store3.gofile.io/download/web/id2/c.rar", "c.rar", "accountToken=tok"),
+         ])):
+        results = resolve_post("https://cosplaytele.com/cantarella-9/", fetcher=fetcher)
+
+    assert len(results) == 2
+    assert results[0].filename == "a b.rar"
+    assert results[0].cookies == "accountToken=tok"
+    assert results[1].direct_url.endswith("c.rar")
+
+
 def test_run_async_inside_running_loop():
     """Playwright sync 세션처럼 main thread에 running loop가 있어도 coroutine 실행 가능해야 한다."""
     async def inner():

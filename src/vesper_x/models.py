@@ -11,3 +11,4 @@ class DownloadMetadata:
     source_page: str
     tags: list[str] = field(default_factory=list)
     models: list[str] = field(default_factory=list)
+    cookies: Optional[str] = None

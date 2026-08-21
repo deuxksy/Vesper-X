@@ -16,6 +16,7 @@ from vesper_x.config import AppConfig, load_config
 from vesper_x.dispatchers.aria2 import Aria2Dispatcher
 from vesper_x.extractors.crawler import CategoryCrawler
 from vesper_x.extractors.cosplaytele import CosplayteleParser, CosplayteleCrawler
+from vesper_x.extractors.gofile import GofileResolver
 from vesper_x.extractors.mediafire import MediafireResolver
 from vesper_x.extractors.misskon import MisskonParser
 from vesper_x.extractors.ouo import OuoBypasser
@@ -114,6 +115,7 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
     results: list[DownloadMetadata] = []
     ouo_bypasser = OuoBypasser()
     mediafire_resolver = MediafireResolver()
+    gofile_resolver = GofileResolver()
 
     for link in links:
         current_url = link
@@ -135,6 +137,31 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
                 console.print(f"[yellow]Bypass failed after retry, skipping: {link}[/yellow]")
                 continue
             current_url = bypassed
+
+        # gofile 폴더 링크는 파일 여러 개로 확장된다 - 파일별 직링크+인증 쿠키로 dispatch
+        if "gofile.io" in current_url:
+            try:
+                gf_downloads = run_async(gofile_resolver.resolve(current_url))
+            except Exception as e:
+                console.print(f"[yellow]Warning resolving gofile {current_url}: {e}[/yellow]")
+                continue
+            if not gf_downloads:
+                console.print(f"[yellow]No gofile downloads resolved, skipping: {current_url}[/yellow]")
+                continue
+            for gf in gf_downloads:
+                results.append(
+                    DownloadMetadata(
+                        direct_url=gf.direct_url,
+                        referer=post_url,
+                        user_agent=DEFAULT_USER_AGENT,
+                        filename=gf.filename,
+                        source_page=post_url,
+                        tags=list(tags),
+                        models=list(matched_models),
+                        cookies=gf.cookies,
+                    )
+                )
+            continue
 
         direct_url = current_url
         if "mediafire.com" in current_url:

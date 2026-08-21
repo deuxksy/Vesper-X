@@ -78,6 +78,30 @@ def test_dispatch_omits_dir_when_download_dir_not_configured():
     assert "dir" not in options
 
 
+def test_dispatch_sends_cookie_header_when_metadata_has_cookies():
+    config = AppConfig(aria2_host="ws://localhost:6800", aria2_secret="s")
+    meta = DownloadMetadata(
+        direct_url="https://store3.gofile.io/download/web/x",
+        referer="https://cosplaytele.com/p/1",
+        user_agent="Mozilla/5.0 Test",
+        filename="part.rar",
+        source_page="https://cosplaytele.com/p/1",
+        cookies="accountToken=tok123",
+    )
+    with patch("vesper_x.dispatchers.aria2.aria2p") as mock_aria2p:
+        mock_api = MagicMock()
+        mock_aria2p.API.return_value = mock_api
+        mock_api.add.return_value.gid = "gid12345"
+        Aria2Dispatcher(config).dispatch(meta)
+        _, kwargs = mock_api.add.call_args
+    assert "Cookie: accountToken=tok123" in kwargs["options"]["header"]
+
+
+def test_dispatch_omits_cookie_header_without_cookies():
+    options = _dispatch_options("https://misskon.com/123")
+    assert not any(h.startswith("Cookie:") for h in options["header"])
+
+
 
     config = AppConfig(aria2_host="ws://heritage.bun-bull.ts.net:6800", aria2_secret="mysecret")
 

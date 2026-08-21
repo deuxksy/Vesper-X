@@ -43,6 +43,8 @@ class Aria2Dispatcher:
                 f"User-Agent: {metadata.user_agent}",
             ]
         }
+        if metadata.cookies:
+            options["header"].append(f"Cookie: {metadata.cookies}")
         if metadata.filename:
             options["out"] = metadata.filename
         if self.config.download_dir:
