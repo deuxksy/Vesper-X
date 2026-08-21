@@ -14,6 +14,7 @@ DEFAULT_MODELS = ["幼水铃衣", "you-shui-ling-yi", "luo-li-lolisama"]
 class AppConfig:
     aria2_host: str = "ws://heritage.bun-bull.ts.net:6800"
     aria2_secret: str = ""
+    download_dir: Optional[str] = None
     models: list[str] = field(default_factory=lambda: list(DEFAULT_MODELS))
     proxy: Optional[str] = None
 
@@ -30,6 +31,7 @@ def load_config() -> AppConfig:
     return AppConfig(
         aria2_host=aria2_data.get("host", "ws://heritage.bun-bull.ts.net:6800"),
         aria2_secret=aria2_data.get("secret", ""),
+        download_dir=aria2_data.get("download_dir"),
         models=models,
         proxy=network_data.get("proxy"),
     )
