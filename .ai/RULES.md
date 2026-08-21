@@ -38,6 +38,6 @@ Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser
 - ouo.io는 2단계 우회다: "I'M A HUMAN" 클릭 → `/go/` 페이지 "Get Link" 버튼(countdown 후 `disabled` 해제) 클릭 → 목적지. 버튼 활성화 대기 필수
 - ouo bypass는 간헐 실패 시 입력 URL을 그대로 반환한다 — `resolve_post`가 결과에 ouo 잔존 시 재시도 후 skip
 - ouo `/st/` 형식 링크(`ouo.io/st/<id>?s=<target>`)는 목적지가 파라미터에 평문 노출된다 — 도착 판정은 hostname 기준(`_is_target_url`)이며 부분문자열 검사 금지. `/st/` 링크는 goto 시 plain `ouo.io/<id>`로 redirect된다
-- gofile/mega 링크는 직링크 변환 없이 aria2에 그대로 전달된다(설계상 pass-through) — gofile.io/d/<id>는 웹페이지라 aria2가 HTML(~3.3KB)만 받는다. gofile resolver는 미구현
+- gofile은 익명 API를 차단한다(error-notPremium) — `GofileResolver`는 웹 UI의 contents XHR을 Playwright로 캡처해 직링크(`download/web/{id}/{name}`) + `accountToken` Cookie로 조립한다. 폴더 링크는 파일 수만큼 metadata로 확장. mega는 여전히 pass-through
 - aria2 host는 `ws://`로 설정해도 `Aria2Dispatcher`가 http(s)로 변환한다
 - aria2 dispatch는 `[aria2] download_dir`(daemon-side 경로, `/downloads` = host `/mnt/data2/torrent/downloads/aria`) 아래 사이트 서브디렉토리(`misskon/`, `cosplaytele/`)로 전송한다 — heritage `extract_organize.sh`가 이 디렉토리로 압축 비번을 분기함 (misskon: `misskon.com`→`mrcong.com`, cosplaytele: `cosplaytele`)
