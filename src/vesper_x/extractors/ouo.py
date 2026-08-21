@@ -1,11 +1,24 @@
 import asyncio
 import logging
+from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
 
 TARGET_DOMAINS = ["mediafire.com", "mega.nz", "gofile.io", "pixeldrain.com"]
+
+
+def _is_target_url(url: str) -> bool:
+    """도착 판정은 URL 전체 부분문자열이 아니라 hostname 기준으로 한다.
+
+    /st/ 형식 ouo 링크는 목적지가 s= 파라미터에 평문으로 박혀 있어
+    부분문자열 검사 시 입력 URL 자체가 목적지로 오판된다.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return False
+    return any(host == d or host.endswith("." + d) for d in TARGET_DOMAINS)
 
 # ouo.io는 2단계 우회다: "I'M A HUMAN" 클릭 -> /go/ 페이지의 "Get Link" 버튼(countdown 후 활성화) 클릭 -> 목적지.
 class OuoBypasser:
@@ -24,7 +37,7 @@ class OuoBypasser:
 
             def check_and_update_url(url: str):
                 nonlocal target_url
-                if any(domain in url for domain in TARGET_DOMAINS):
+                if _is_target_url(url):
                     target_url = url
 
             def on_response(response):
@@ -48,9 +61,9 @@ class OuoBypasser:
                 # 각 단계: 버튼이 나타나고 활성화될 때까지 기다렸다 클릭, 목적지 도달 시 종료.
                 # stage-2(/go/)는 Cloudflare Turnstile 검증 후 버튼이 늦게 생성되기도 한다.
                 for _stage in range(4):
-                    if any(domain in target_url for domain in TARGET_DOMAINS):
+                    if _is_target_url(target_url):
                         break
-                    if any(domain in page.url for domain in TARGET_DOMAINS):
+                    if _is_target_url(page.url):
                         target_url = page.url
                         break
 
@@ -62,7 +75,7 @@ class OuoBypasser:
                     await btn.click()
                     for _ in range(25):
                         await page.wait_for_timeout(1000)
-                        if any(domain in page.url for domain in TARGET_DOMAINS):
+                        if _is_target_url(page.url):
                             target_url = page.url
                             break
                         if page.url != prev_url:
