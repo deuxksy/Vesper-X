@@ -27,6 +27,13 @@ Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser
 ## Conventions
 
 - 새 host 지원: `extractors/`에 Parser/Resolver 추가 + `cli.py:resolve_post`에 domain 분기
+- **디지털 미디어 아카이브 수집 전략**:
+  - **1차 주력 (Primary)**: `CosplayTele`, `MissKon` — 4K/8K 무손실 원본 통압축(ZIP) 미디어 최우선 파이프라인
+  - **2차 보조 (Secondary)**: `EVERIA.CLUB`, `E-Hentai` — 1차 누락 앨범 및 아카이브 발굴용 (`gallery-dl` / 갤러리 덤프)
+- **원격 아카이빙 디렉토리 분류 표준 (`/mnt/data2/torrent/downloads/aria/`)**:
+  - 최상위 권역 분류: `KOR` / `JPN` / `CHN` / `SEA` (동남아: 베트남·태국·말레이시아 통합) / `ETC`
+  - 아티스트 디렉토리 명명: `영어 (원문)` 포맷 및 A-Z 정렬 기준 (예: `Byoru (ビョル)`, `Tiny Asa (アサ)`, `Aqua (水淼)`)
+  - 계층 구조: `[권역] > [아티스트 (원문)] > [개별 앨범 세트]`
 - Test는 실 network 없이 mock으로 작성 (전 test suite가 mock 기반)
 - Python >= 3.12 표준 library 우선
 
