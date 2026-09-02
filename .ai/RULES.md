@@ -16,13 +16,13 @@ Lint 도구는 미설정. 도입 시 이 표를 갱신한다.
 ## Architecture
 
 - `src/vesper_x/cli.py` — Typer entry. parse / crawl / clip / batch
-- `src/vesper_x/extractors/` — Parser(misskon, cosplaytele) · Crawler(crawler) · Bypasser(ouo) · Resolver(mediafire)
+- `src/vesper_x/extractors/` — Parser(misskon, cosplaytele) · Crawler(crawler) · Bypasser(ouo) · Resolver(mediafire, gofile)
 - `src/vesper_x/fetchers.py` — `BrowserFetcher` (Chrome ECH page fetch, `crawl`이 사용)
 - `src/vesper_x/dispatchers/aria2.py` — aria2p RPC 전송
 - `src/vesper_x/models.py` — `DownloadMetadata` 전송 단위
 - `src/vesper_x/config.py` — `~/.config/url-resolver/config.toml` 로드 (`[network] proxy` 선택)
 
-Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser(ouo) → Resolver(mediafire) → DownloadMetadata → Dispatcher(aria2)
+Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser(ouo) → Resolver(mediafire, gofile) → DownloadMetadata → Dispatcher(aria2)
 
 ## Conventions
 
@@ -31,7 +31,7 @@ Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser
   - **1차 주력 (Primary)**: `CosplayTele`, `MissKon` — 4K/8K 무손실 원본 통압축(ZIP) 미디어 최우선 파이프라인
   - **2차 보조 (Secondary)**: `EVERIA.CLUB`, `E-Hentai` — 1차 누락 앨범 및 아카이브 발굴용 (`gallery-dl` / 갤러리 덤프)
 - **원격 아카이빙 디렉토리 분류 표준 (`/mnt/data2/torrent/downloads/aria/`)**:
-  - 최상위 권역 분류: `KOR` / `JPN` / `CHN` / `SEA` (동남아: 베트남·태국·말레이시아 통합) / `ETC`
+  - 최상위 권역 분류: `KOR` / `JPN` / `CHN` / `SEA` / `WEST` (5대 독립 리그 우선 분류) ➡️ `ETC` (미분류 폴백)
   - 아티스트 디렉토리 명명: `영어 (원문)` 포맷 및 A-Z 정렬 기준 (예: `Byoru (ビョル)`, `Tiny Asa (アサ)`, `Aqua (水淼)`)
   - 계층 구조: `[권역] > [아티스트 (원문)] > [개별 앨범 세트]`
 - Test는 실 network 없이 mock으로 작성 (전 test suite가 mock 기반)

@@ -23,6 +23,16 @@ def _is_target_url(url: str) -> bool:
 # ouo.io는 2단계 우회다: "I'M A HUMAN" 클릭 -> /go/ 페이지의 "Get Link" 버튼(countdown 후 활성화) 클릭 -> 목적지.
 class OuoBypasser:
     async def resolve(self, short_url: str) -> str:
+        # Fast path: /st/ links often contain the target directly in the query parameter '?s='
+        parsed = urlparse(short_url)
+        if "/st/" in parsed.path and parsed.query:
+            from urllib.parse import parse_qs, unquote
+            qs = parse_qs(parsed.query)
+            if "s" in qs and qs["s"]:
+                target = unquote(qs["s"][0])
+                if _is_target_url(target):
+                    return target
+
         return await self._run_playwright_bypass(short_url)
 
     async def _run_playwright_bypass(self, short_url: str) -> str:

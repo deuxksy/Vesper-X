@@ -1,6 +1,6 @@
 # Gemini / Antigravity — Vesper-X
 
-작업 전 root `.ai/RULES.md`를 먼저 읽는다.
+@./.ai/RULES.md
 
 ## Antigravity 전용
 

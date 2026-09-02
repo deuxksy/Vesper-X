@@ -58,9 +58,14 @@ uv run vesper clip
 
 ---
 
-## 📚 문서 및 로드맵
+## 📚 문서 및 안내 (Documentation & Diátaxis Index)
 
-- [ROADMAP.md](ROADMAP.md) — 중장기 우회 고도화 및 파일호스트 확장 계획
+| 영역 (Quadrant) | 대상 문서 및 가이드 | 설명 |
+| :--- | :--- | :--- |
+| **🚀 Tutorials (튜토리얼)** | [📦 설치 및 시작하기](#-설치) | 패키지 동기화 및 단축링크 우회 브라우저 초기 설정 |
+| **🛠️ How-To Guides (가이드)** | [💻 핵심 사용법](#-사용법) | 단일 파싱, 태그별 연속 크롤링, 클립보드 즉시 처리 절차 |
+| **📖 Reference (참고자료)** | [CLI 명령어 명세](#-사용법) | `vesper` CLI 서브커맨드(`parse`, `crawl`, `clip`) 규격 |
+| **💡 Explanation (설명/원리)** | [🏗️ 아키텍처 및 파이프라인](#️-아키텍처-및-파이프라인)<br>[🗺️ ROADMAP.md](ROADMAP.md) | ECH/DoH 네트워크 파이프라인 동작 원리 및 중장기 확장 로드맵 |
 
 ---
 
