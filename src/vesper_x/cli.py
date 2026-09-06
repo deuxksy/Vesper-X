@@ -15,7 +15,6 @@ from rich.console import Console
 from vesper_x.config import AppConfig, load_config
 from vesper_x.dispatchers.aria2 import Aria2Dispatcher
 from vesper_x.extractors.crawler import CategoryCrawler
-from vesper_x.extractors.cup2d import Cup2dCrawler
 from vesper_x.extractors.cosplaytele import CosplayteleParser, CosplayteleCrawler
 from vesper_x.extractors.gofile import GofileResolver
 from vesper_x.extractors.mediafire import MediafireResolver
@@ -87,7 +86,6 @@ def _select_crawler(url: str, config: AppConfig):
     crawlers = {
         "category": CategoryCrawler,
         "cosplaytele": CosplayteleCrawler,
-        "cup2d": Cup2dCrawler,
     }
     host = urllib.parse.urlparse(url).hostname or ""
     for domain, site in config.sites.items():
@@ -128,7 +126,9 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
     matched_models = extract_models_from_tags_and_html(tags, html_content, post_url, config.models)
 
     results: list[DownloadMetadata] = []
-    ouo_bypasser = OuoBypasser(proxy=config.proxy)
+    # ouo는 한국 미차단 + Cloudflare challenge에 데이터센터 IP가 불리해 직접 경로,
+    # gofile은 프록시 경유
+    ouo_bypasser = OuoBypasser()
     mediafire_resolver = MediafireResolver()
     gofile_resolver = GofileResolver(proxy=config.proxy)
 

@@ -90,3 +90,54 @@ async def test_run_bypass_clicks_through_to_destination(start_url, after_click_u
     with patch("vesper_x.extractors.ouo.async_playwright", _fake_playwright(page)):
         result = await OuoBypasser()._run_playwright_bypass(start_url)
     assert result == after_click_url
+
+
+class ChainButton:
+    def __init__(self, page):
+        self.page = page
+
+    async def is_visible(self):
+        return True
+
+    async def click(self):
+        self.page.clicks += 1
+        self.page.url = self.page.urls[min(self.page.clicks, len(self.page.urls) - 1)]
+
+
+class ChainPage:
+    """ouo 3중 체인 흉내 - 6번의 버튼 클릭 뒤에야 목적지 도착."""
+
+    def __init__(self, urls):
+        self.url = urls[0]
+        self.urls = urls
+        self.clicks = 0
+
+    def on(self, event, handler):
+        pass
+
+    async def goto(self, url, **kwargs):
+        pass
+
+    async def wait_for_timeout(self, ms):
+        pass
+
+    async def query_selector(self, selector):
+        return ChainButton(self)
+
+    async def evaluate(self, expression, element):
+        return True
+
+
+@pytest.mark.asyncio
+async def test_run_bypass_follows_multi_hop_ouo_chain():
+    """ouo 다중 체인(6스테이지)도 스테이지 한계로 중도 포기하면 안 된다."""
+    urls = [
+        "https://ouo.io/aaa111", "https://ouo.press/go/aaa111",
+        "https://ouo.io/bbb222", "https://ouo.io/go/bbb222",
+        "https://ouo.io/ccc333", "https://ouo.io/go/ccc333",
+        "https://www.mediafire.com/file/xyz/set.rar/file",
+    ]
+    page = ChainPage(urls)
+    with patch("vesper_x.extractors.ouo.async_playwright", _fake_playwright(page)):
+        result = await OuoBypasser()._run_playwright_bypass("https://ouo.io/aaa111")
+    assert result == urls[-1]

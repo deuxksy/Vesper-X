@@ -17,11 +17,10 @@ class SiteConfig:
 
 
 # 사이트 추가는 config.toml [sites]에 도메인을 등록한다 (코드 수정 불필요).
-# crawler 이름은 cli._select_crawler의 registry 키(category/cosplaytele/cup2d)와 매칭.
+# crawler 이름은 cli._select_crawler의 registry 키(category/cosplaytele)와 매칭.
 DEFAULT_SITES = {
     "misskon.com": SiteConfig(crawler="category", subdir="misskon"),
     "cosplaytele.com": SiteConfig(crawler="cosplaytele", subdir="cosplaytele"),
-    "cup2d.com": SiteConfig(crawler="cup2d", subdir="cup2d"),
 }
 
 

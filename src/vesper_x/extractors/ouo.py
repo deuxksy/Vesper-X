@@ -43,13 +43,15 @@ class OuoBypasser:
         target_url = short_url
 
         async with async_playwright() as p:
-            launch_kwargs: dict = {"headless": True}
+            # ouo.io가 Cloudflare challenge를 앞에 뒀다 - 번들/headless Chromium은
+            # "Just a moment..."에서 막히며 real Chrome headed만 통과한다 (2026-09-05 실측)
+            launch_kwargs: dict = {"channel": "chrome", "headless": False}
             if self.proxy:
                 launch_kwargs["proxy"] = {"server": self.proxy}
             browser = await p.chromium.launch(**launch_kwargs)
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+            # UA를 덮어쓰지 않는다 - 가짜 UA(Chrome/120)와 실제 Chrome 바이너리 지문의
+            # 불일치가 Cloudflare challenge를 유발한다 (2026-09-05 실측)
+            context = await browser.new_context()
             page = await context.new_page()
 
             def check_and_update_url(url: str):
@@ -77,7 +79,8 @@ class OuoBypasser:
 
                 # 각 단계: 버튼이 나타나고 활성화될 때까지 기다렸다 클릭, 목적지 도달 시 종료.
                 # stage-2(/go/)는 Cloudflare Turnstile 검증 후 버튼이 늦게 생성되기도 한다.
-                for _stage in range(4):
+                # 일부 사이트는 ouo 3중 체인(6스테이지)을 쓴다 - 여유를 두고 12까지 허용.
+                for _stage in range(12):
                     if _is_target_url(target_url):
                         break
                     if _is_target_url(page.url):

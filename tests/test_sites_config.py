@@ -12,7 +12,6 @@ runner = CliRunner()
 SITES_TOML = """
 [sites]
 "misskon.com" = { crawler = "category", subdir = "misskon" }
-"cup2d.com" = { crawler = "cup2d", subdir = "cup2d" }
 """
 
 
@@ -22,7 +21,7 @@ def test_load_config_parses_sites_section(tmp_path, monkeypatch):
     monkeypatch.setattr("vesper_x.config.DEFAULT_CONFIG_PATH", config_file)
 
     cfg = load_config()
-    assert cfg.sites["cup2d.com"].crawler == "cup2d"
+    assert cfg.sites["misskon.com"].crawler == "category"
     assert cfg.sites["misskon.com"].subdir == "misskon"
 
 
@@ -33,32 +32,30 @@ def test_load_config_sites_defaults_when_section_absent(tmp_path, monkeypatch):
 
     cfg = load_config()
     assert cfg.sites["misskon.com"].crawler == "category"
-    assert cfg.sites["cup2d.com"].subdir == "cup2d"
+    assert cfg.sites["cosplaytele.com"].subdir == "cosplaytele"
 
 
 def test_app_config_has_builtin_default_sites():
     cfg = AppConfig()
-    assert set(cfg.sites) == {"misskon.com", "cosplaytele.com", "cup2d.com"}
+    assert set(cfg.sites) == {"misskon.com", "cosplaytele.com"}
 
 
 def test_crawl_crawler_selection_driven_by_sites_config():
-    """config가 cup2d.com을 category crawler로 지정하면 Cup2dCrawler를 쓰지 않는다."""
+    """config [sites]가 crawler 종류를 결정한다 - 미등록 도메인 폴백과 구분된다."""
     fetcher = MagicMock()
     fetcher.fetch.return_value = "<html></html>"
     config = AppConfig(proxy=None, sites={
-        "cup2d.com": SiteConfig(crawler="category", subdir="cup2d"),
+        "warpixel.dev": SiteConfig(crawler="category", subdir="warpixel"),
     })
     with patch("vesper_x.cli.BrowserFetcher") as bf_cls, \
          patch("vesper_x.cli.load_config", return_value=config), \
          patch("vesper_x.cli.resolve_post", return_value=[]), \
-         patch("vesper_x.cli.Cup2dCrawler") as cup2d_cls, \
          patch("vesper_x.cli.CategoryCrawler") as category_cls:
         bf_cls.return_value.__enter__.return_value = fetcher
         category_cls.return_value.extract_post_urls.return_value = []
         category_cls.return_value.extract_pagination_urls.return_value = []
-        result = runner.invoke(app, ["crawl", "https://cup2d.com/category/x/", "--pages", "1", "--extract-only"])
+        result = runner.invoke(app, ["crawl", "https://warpixel.dev/category/x/", "--pages", "1", "--extract-only"])
         assert result.exit_code == 0
-    cup2d_cls.assert_not_called()
     category_cls.assert_called_once()
 
 
@@ -85,16 +82,16 @@ def test_dispatch_dir_uses_sites_config_subdir():
     """subdir을 config에서 읽는다 - 코드의 고정 테이블이 아니다."""
     config = AppConfig(
         aria2_host="ws://localhost:6800", aria2_secret="s", download_dir="/data/aria",
-        sites={"cup2d.com": SiteConfig(crawler="cup2d", subdir="custom_dir")},
+        sites={"warpixel.dev": SiteConfig(crawler="category", subdir="custom_dir")},
     )
-    options = _dispatch_options(config, "https://cup2d.com/some-post/")
+    options = _dispatch_options(config, "https://warpixel.dev/some-post/")
     assert options["dir"] == "/data/aria/custom_dir"
 
 
 def test_dispatch_dir_matches_subdomain():
     config = AppConfig(
         aria2_host="ws://localhost:6800", aria2_secret="s", download_dir="/data/aria",
-        sites={"cup2d.com": SiteConfig(crawler="cup2d", subdir="cup2d")},
+        sites={"warpixel.dev": SiteConfig(crawler="category", subdir="warpixel")},
     )
-    options = _dispatch_options(config, "https://www.cup2d.com/some-post/")
-    assert options["dir"] == "/data/aria/cup2d"
+    options = _dispatch_options(config, "https://www.warpixel.dev/some-post/")
+    assert options["dir"] == "/data/aria/warpixel"

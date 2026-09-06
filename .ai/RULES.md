@@ -26,7 +26,7 @@ Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser
 
 ## Conventions
 
-- 새 host 지원: `extractors/`에 Crawler 추가 + `config.toml [sites]`에 도메인 등록 — `crawler` 이름은 `cli._select_crawler` registry 키(`category`/`cosplaytele`/`cup2d`)와 매칭, `subdir`은 aria2 라우팅 디렉토리. 다운로드 링크(ouo→파일호스트) 추출은 MisskonParser 공용 경로를 탄다
+- 새 host 지원: `extractors/`에 Crawler 추가 + `config.toml [sites]`에 도메인 등록 — `crawler` 이름은 `cli._select_crawler` registry 키(`category`/`cosplaytele`)와 매칭, `subdir`은 aria2 라우팅 디렉토리. 다운로드 링크(ouo→파일호스트) 추출은 MisskonParser 공용 경로를 탄다
 - **디지털 미디어 아카이브 수집 전략**:
   - **1차 주력 (Primary)**: `CosplayTele`, `MissKon` — 4K/8K 무손실 원본 통압축(ZIP) 미디어 최우선 파이프라인
   - **2차 보조 (Secondary)**: `EVERIA.CLUB`, `E-Hentai` — 1차 누락 앨범 및 아카이브 발굴용 (`gallery-dl` / 갤러리 덤프)
@@ -48,4 +48,4 @@ Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser
 - ouo `/st/` 형식 링크(`ouo.io/st/<id>?s=<target>`)는 목적지가 파라미터에 평문 노출된다 — 도착 판정은 hostname 기준(`_is_target_url`)이며 부분문자열 검사 금지. `/st/` 링크는 goto 시 plain `ouo.io/<id>`로 redirect된다
 - gofile은 익명 API를 차단한다(error-notPremium) — `GofileResolver`는 웹 UI의 contents XHR을 Playwright로 캡처해 직링크(`download/web/{id}/{name}`) + `accountToken` Cookie로 조립한다. 폴더 링크는 파일 수만큼 metadata로 확장. mega는 여전히 pass-through
 - aria2 host는 `ws://`로 설정해도 `Aria2Dispatcher`가 http(s)로 변환한다
-- aria2 dispatch는 `[aria2] download_dir`(daemon-side 경로, `/downloads` = host `/mnt/data2/torrent/downloads/aria`) 아래 사이트 서브디렉토리(`misskon/`, `cosplaytele/`, `cup2d/`)로 전송한다 — heritage `extract_organize.sh`가 이 디렉토리로 압축 비번을 분기함 (misskon: `misskon.com`→`mrcong.com`, cosplaytele: `cosplaytele`, cup2d: `Cup2D`)
+- aria2 dispatch는 `[aria2] download_dir`(daemon-side 경로, `/downloads` = host `/mnt/data2/torrent/downloads/aria`) 아래 사이트 서브디렉토리(`misskon/`, `cosplaytele/`)로 전송한다 — heritage `extract_organize.sh`가 이 디렉토리로 압축 비번을 분기함 (misskon: `misskon.com`→`mrcong.com`, cosplaytele: `cosplaytele`)

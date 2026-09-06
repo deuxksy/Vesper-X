@@ -32,7 +32,9 @@ def test_resolve_post_constructs_resolvers_with_proxy():
             GofileDownload("https://store3.gofile.io/download/web/id1/a.rar", "a.rar", "accountToken=t")
         ])
         results = resolve_post("https://misskon.com/x/", config=AppConfig(proxy=PROXY))
-    ouo_cls.assert_called_once_with(proxy=PROXY)
+    # ouo는 한국 미차단이며 Cloudflare challenge에 데이터센터 IP가 불리해 프록시 미사용.
+    # gofile은 프록시 경유.
+    ouo_cls.assert_called_once_with()
     gofile_cls.assert_called_once_with(proxy=PROXY)
     assert len(results) == 1
 
@@ -75,6 +77,22 @@ async def test_ouo_bypasser_launches_browser_with_proxy():
     with patch("vesper_x.extractors.ouo.async_playwright", _fake_playwright_capturing_launch(launch_mock)):
         await OuoBypasser(proxy=PROXY)._run_playwright_bypass("https://ouo.io/abc123")
     assert launch_mock.call_args.kwargs.get("proxy") == {"server": PROXY}
+
+
+@pytest.mark.asyncio
+async def test_ouo_bypasser_launches_real_chrome_headed():
+    """ouo.io는 Cloudflare challenge가 있어 번들/headless Chromium은 막힌다 - real Chrome headed만 통과."""
+    context_mock = AsyncMock(return_value=SimpleNamespace(new_page=AsyncMock(return_value=_NoOpPage())))
+    launch_mock = AsyncMock(return_value=SimpleNamespace(
+        new_context=context_mock,
+        close=AsyncMock(),
+    ))
+    with patch("vesper_x.extractors.ouo.async_playwright", _fake_playwright_capturing_launch(launch_mock)):
+        await OuoBypasser()._run_playwright_bypass("https://ouo.io/abc123")
+    assert launch_mock.call_args.kwargs.get("channel") == "chrome"
+    assert launch_mock.call_args.kwargs.get("headless") is False
+    # 가짜 UA를 덮어쓰면 실제 Chrome 지문과 불일치해 CF challenge에 걸린다 - UA 스푸핑 금지
+    assert "user_agent" not in context_mock.call_args.kwargs
 
 
 @pytest.mark.asyncio
