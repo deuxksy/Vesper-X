@@ -1,6 +1,7 @@
 import json
 import logging
 from dataclasses import dataclass
+from typing import Optional
 from urllib.parse import quote
 
 from playwright.async_api import async_playwright
@@ -27,13 +28,19 @@ class GofileResolver:
       인증은 Cookie: accountToken=<token>
     """
 
+    def __init__(self, proxy: Optional[str] = None):
+        self.proxy = proxy
+
     async def resolve(self, page_url: str) -> list[GofileDownload]:
         content_id = page_url.rstrip("/").split("/")[-1]
         body: bytes | None = None
         cookies: dict[str, str] = {}
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            launch_kwargs: dict = {"headless": True}
+            if self.proxy:
+                launch_kwargs["proxy"] = {"server": self.proxy}
+            browser = await p.chromium.launch(**launch_kwargs)
             context = await browser.new_context(user_agent=USER_AGENT)
             page = await context.new_page()
 

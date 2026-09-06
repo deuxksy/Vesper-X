@@ -15,6 +15,7 @@ from rich.console import Console
 from vesper_x.config import AppConfig, load_config
 from vesper_x.dispatchers.aria2 import Aria2Dispatcher
 from vesper_x.extractors.crawler import CategoryCrawler
+from vesper_x.extractors.cup2d import Cup2dCrawler
 from vesper_x.extractors.cosplaytele import CosplayteleParser, CosplayteleCrawler
 from vesper_x.extractors.gofile import GofileResolver
 from vesper_x.extractors.mediafire import MediafireResolver
@@ -81,6 +82,20 @@ def run_async(coro):
         return ex.submit(asyncio.run, coro).result()
 
 
+def _select_crawler(url: str, config: AppConfig):
+    """config [sites]의 도메인 매칭으로 crawler를 고른다 - 미등록 도메인은 category 기본."""
+    crawlers = {
+        "category": CategoryCrawler,
+        "cosplaytele": CosplayteleCrawler,
+        "cup2d": Cup2dCrawler,
+    }
+    host = urllib.parse.urlparse(url).hostname or ""
+    for domain, site in config.sites.items():
+        if host == domain or host.endswith("." + domain):
+            return crawlers[site.crawler]()
+    return crawlers["category"]()
+
+
 def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag: Optional[str] = None, fetcher: Optional[BrowserFetcher] = None) -> list[DownloadMetadata]:
     if config is None:
         config = load_config()
@@ -90,7 +105,7 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
         if fetcher is not None:
             html_content = fetcher.fetch(post_url)
         else:
-            resp = httpx.get(post_url, headers=headers, follow_redirects=True, timeout=30.0)
+            resp = httpx.get(post_url, headers=headers, follow_redirects=True, timeout=30.0, proxy=config.proxy)
             html_content = resp.text
     except Exception as e:
         console.print(f"[bold red]Failed to fetch post URL {post_url}: {e}[/bold red]")
@@ -113,9 +128,9 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
     matched_models = extract_models_from_tags_and_html(tags, html_content, post_url, config.models)
 
     results: list[DownloadMetadata] = []
-    ouo_bypasser = OuoBypasser()
+    ouo_bypasser = OuoBypasser(proxy=config.proxy)
     mediafire_resolver = MediafireResolver()
-    gofile_resolver = GofileResolver()
+    gofile_resolver = GofileResolver(proxy=config.proxy)
 
     for link in links:
         current_url = link
@@ -166,7 +181,7 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
         direct_url = current_url
         if "mediafire.com" in current_url:
             try:
-                mf_resp = httpx.get(current_url, headers=headers, follow_redirects=True, timeout=30.0)
+                mf_resp = httpx.get(current_url, headers=headers, follow_redirects=True, timeout=30.0, proxy=config.proxy)
                 extracted_direct = mediafire_resolver.extract_direct_url(mf_resp.text)
                 if extracted_direct:
                     direct_url = extracted_direct
@@ -311,15 +326,12 @@ def crawl(
     """Crawl category or tag listing across multiple pages and process all posts.
 
     페이지를 페치할 때마다 해당 post를 즉시 resolve+dispatch 한다 (최신 페이지 우선, 스트리밍)."""
-    if "cosplaytele.com" in url:
-        crawler = CosplayteleCrawler()
-    else:
-        crawler = CategoryCrawler()
-
     tag_match = re.search(r"/(?:tag|category)/([^/]+)/", url)
     tag_slug = tag_match.group(1) if tag_match else None
 
     config = load_config()
+    # 사이트별 crawler는 config [sites]가 결정한다
+    crawler = _select_crawler(url, config)
     dispatcher = None if extract_only else Aria2Dispatcher(config)
 
     visited_pages = set()

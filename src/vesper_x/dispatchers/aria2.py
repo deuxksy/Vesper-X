@@ -1,22 +1,17 @@
 from urllib.parse import urlparse
 import aria2p
 
-from vesper_x.config import AppConfig
+from vesper_x.config import AppConfig, SiteConfig
 from vesper_x.models import DownloadMetadata
 
-# source_page 도메인 → 다운로드 서브디렉토리. heritage 압축 해제 스크립트가
-# 사이트별 고정 비번(misskon/cosplaytele)을 디렉토리로 판별한다.
-SITE_DIRS = {
-    "misskon.com": "misskon",
-    "cosplaytele.com": "cosplaytele",
-}
 
-
-def _site_subdir(source_page: str) -> str | None:
+def _site_subdir(source_page: str, sites: dict[str, SiteConfig]) -> str | None:
+    """source_page 도메인 → 다운로드 서브디렉토리. heritage 압축 해제 스크립트가
+    사이트별 고정 비번(misskon/cosplaytele)을 디렉토리로 판별한다."""
     host = urlparse(source_page).hostname or ""
-    for domain, subdir in SITE_DIRS.items():
+    for domain, site in sites.items():
         if host == domain or host.endswith("." + domain):
-            return subdir
+            return site.subdir
     return None
 
 
@@ -48,7 +43,7 @@ class Aria2Dispatcher:
         if metadata.filename:
             options["out"] = metadata.filename
         if self.config.download_dir:
-            subdir = _site_subdir(metadata.source_page)
+            subdir = _site_subdir(metadata.source_page, self.config.sites)
             if subdir:
                 options["dir"] = self.config.download_dir.rstrip("/") + "/" + subdir
 

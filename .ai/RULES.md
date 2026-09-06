@@ -20,13 +20,13 @@ Lint 도구는 미설정. 도입 시 이 표를 갱신한다.
 - `src/vesper_x/fetchers.py` — `BrowserFetcher` (Chrome ECH page fetch, `crawl`이 사용)
 - `src/vesper_x/dispatchers/aria2.py` — aria2p RPC 전송
 - `src/vesper_x/models.py` — `DownloadMetadata` 전송 단위
-- `src/vesper_x/config.py` — `~/.config/url-resolver/config.toml` 로드 (`[network] proxy` 선택)
+- `src/vesper_x/config.py` — `~/.config/url-resolver/config.toml` 로드 (`[network] proxy`, `[sites]` 도메인→crawler/subdir 매핑)
 
 Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser(ouo) → Resolver(mediafire, gofile) → DownloadMetadata → Dispatcher(aria2)
 
 ## Conventions
 
-- 새 host 지원: `extractors/`에 Parser/Resolver 추가 + `cli.py:resolve_post`에 domain 분기
+- 새 host 지원: `extractors/`에 Crawler 추가 + `config.toml [sites]`에 도메인 등록 — `crawler` 이름은 `cli._select_crawler` registry 키(`category`/`cosplaytele`/`cup2d`)와 매칭, `subdir`은 aria2 라우팅 디렉토리. 다운로드 링크(ouo→파일호스트) 추출은 MisskonParser 공용 경로를 탄다
 - **디지털 미디어 아카이브 수집 전략**:
   - **1차 주력 (Primary)**: `CosplayTele`, `MissKon` — 4K/8K 무손실 원본 통압축(ZIP) 미디어 최우선 파이프라인
   - **2차 보조 (Secondary)**: `EVERIA.CLUB`, `E-Hentai` — 1차 누락 앨범 및 아카이브 발굴용 (`gallery-dl` / 갤러리 덤프)
@@ -40,6 +40,7 @@ Pipeline: CLI → BrowserFetcher(Chrome ECH) → Crawler → Parser → Bypasser
 ## Gotchas
 
 - pytest `asyncio_mode = "strict"` — async test에 `@pytest.mark.asyncio` 필수
+- 모든 fetch 경로(cli httpx, ouo/gofile Playwright, BrowserFetcher)는 `[network] proxy`(brla gluetun, Surfshark SG egress)를 탄다 — 한국 SNI/NextDNS/geo 차단은 이걸로 우회. 다운로드 자체는 heritage aria2가 직접 받는다 (프록시 미경유)
 - `OuoBypasser.resolve()`는 async — sync context에서는 `cli.run_async()` 호출. Playwright sync 세션(`BrowserFetcher` with 블록) 안에서는 main thread에 running loop가 남아 `asyncio.run()` 직접 호출 시 RuntimeError
 - misskon.com은 한국 이중 차단(ISP SNI + Cloudflare 451) — httpx/번들 Chromium 모두 실패. `BrowserFetcher`는 `channel="chrome"`(실제 Chrome) + ECH + secure DoH launch args 필수
 - ouo.io는 2단계 우회다: "I'M A HUMAN" 클릭 → `/go/` 페이지 "Get Link" 버튼(countdown 후 `disabled` 해제) 클릭 → 목적지. 버튼 활성화 대기 필수

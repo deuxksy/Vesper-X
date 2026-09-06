@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import Optional
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
@@ -22,6 +23,9 @@ def _is_target_url(url: str) -> bool:
 
 # ouo.io는 2단계 우회다: "I'M A HUMAN" 클릭 -> /go/ 페이지의 "Get Link" 버튼(countdown 후 활성화) 클릭 -> 목적지.
 class OuoBypasser:
+    def __init__(self, proxy: Optional[str] = None):
+        self.proxy = proxy
+
     async def resolve(self, short_url: str) -> str:
         # Fast path: /st/ links often contain the target directly in the query parameter '?s='
         parsed = urlparse(short_url)
@@ -39,7 +43,10 @@ class OuoBypasser:
         target_url = short_url
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            launch_kwargs: dict = {"headless": True}
+            if self.proxy:
+                launch_kwargs["proxy"] = {"server": self.proxy}
+            browser = await p.chromium.launch(**launch_kwargs)
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
