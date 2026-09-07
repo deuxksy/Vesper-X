@@ -151,3 +151,24 @@ async def test_gofile_resolver_launches_browser_with_proxy():
     # body를 캡처하지 못하면 [] 반환 - 이 테스트의 관심사는 launch kwargs
     assert result == []
     assert launch_mock.call_args.kwargs.get("proxy") == {"server": PROXY}
+
+
+def test_resolve_post_records_file_page_url():
+    """dispatch_log용: CDN 직링크(만료/IP묶임)가 아니라 파일호스트 페이지 URL
+    (mediafire.com/file/<id>)를 metadata에 남긴다."""
+    post_resp = MagicMock()
+    post_resp.text = '<html><body><a href="https://ouo.io/abc">dl</a></body></html>'
+    mf_resp = MagicMock()
+    mf_resp.text = "<html></html>"
+
+    def fake_get(url, **kwargs):
+        return mf_resp if "mediafire" in url else post_resp
+
+    with patch("vesper_x.cli.httpx.get", side_effect=fake_get), \
+         patch("vesper_x.extractors.ouo.OuoBypasser.resolve",
+               return_value="https://www.mediafire.com/file/heiwusaxysbl7k0"), \
+         patch("vesper_x.extractors.mediafire.MediafireResolver.extract_direct_url",
+               return_value="https://download2292.mediafire.com/signed-token/heiwusaxysbl7k0/set.rar"):
+        results = resolve_post("https://misskon.com/post/", config=AppConfig())
+    assert results[0].direct_url.startswith("https://download2292.mediafire.com")
+    assert results[0].file_page_url == "https://www.mediafire.com/file/heiwusaxysbl7k0"

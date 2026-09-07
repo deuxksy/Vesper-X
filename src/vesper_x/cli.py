@@ -241,6 +241,7 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
             source_page=post_url,
             tags=list(tags),
             models=list(matched_models),
+            file_page_url=current_url,
         )
         results.append(meta)
 
@@ -542,7 +543,8 @@ def run_crawl(url: str, pages: int = 1, limit: int = 0, extract_only: bool = Fal
                             gid = dispatcher.dispatch(m)
                             console.print(f"[bold green]Dispatched to aria2[/bold green] (GID: [cyan]{gid}[/cyan]) - {m.filename or m.direct_url[:60]}")
                             console.print(f"[dim]  [aria2] {dispatcher.format_status(dispatcher.status_summary())}[/dim]")
-                            registry.record_dispatch(post_url, note=m.filename, direct_url=m.direct_url)
+                            registry.record_dispatch(post_url, note=m.filename,
+                                     direct_url=m.file_page_url or m.direct_url)
                         except Exception as e:
                             console.print(f"[bold red]Failed to dispatch to aria2: {e}[/bold red]")
 
