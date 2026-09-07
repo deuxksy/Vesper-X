@@ -31,6 +31,48 @@ class Aria2Dispatcher:
         )
         self.api = aria2p.API(self.client)
 
+    def waiting_count(self) -> int:
+        """aria2 waiting 큐 개수 - crawl 게이트는 waiting이 비어있을 때만 dispatch한다."""
+        return sum(1 for d in self.client.tell_waiting(0, 100) if d.get("status") == "waiting")
+
+    def status_summary(self) -> dict:
+        """aria2 전체 상태 집계 - crawl 진행 중 가시화용."""
+        counts = {"active": 0, "waiting": 0, "paused": 0, "complete": 0, "error": 0, "total": 0}
+        for d in self.client.tell_active():
+            counts["active"] += 1
+        for d in self.client.tell_waiting(0, 1000):
+            status = d.get("status")
+            if status in counts:
+                counts[status] += 1
+        for d in self.client.tell_stopped(0, 1000):
+            status = d.get("status")
+            if status in counts:
+                counts[status] += 1
+        counts["total"] = sum(counts[k] for k in ("active", "waiting", "paused", "complete", "error"))
+        return counts
+
+    def active_downloads(self) -> list[dict]:
+        """진행 중 다운로드 상세 (이름/용량/진행/속도) - status 명령용."""
+        items = []
+        for d in self.client.tell_active():
+            name = (d.get("files") or [{"path": ""}])[0].get("path", "").rsplit("/", 1)[-1]
+            total = int(d.get("totalLength", 0))
+            done = int(d.get("completedLength", 0))
+            speed = int(d.get("downloadSpeed", 0))
+            items.append({
+                "name": name,
+                "total_mb": total / 1048576,
+                "done_mb": done / 1048576,
+                "speed_mb": speed / 1048576,
+            })
+        return items
+
+    @staticmethod
+    def format_status(summary: dict) -> str:
+        return (f"전체 {summary['total']} | ↓ {summary['active']} | "
+                f"대기 {summary['waiting']} | 일시 {summary['paused']} | "
+                f"완료 {summary['complete']} | 오류 {summary['error']}")
+
     def dispatch(self, metadata: DownloadMetadata) -> str:
         options = {
             "header": [

@@ -55,12 +55,17 @@ class FakePage:
         pass
 
 
-def _fake_playwright(page: FakePage):
+def _fake_playwright(page):
+    """persistent context 흉내: launch_persistent_context가 pages=[page] 컨텍스트 반환."""
     ctx = MagicMock()
     ctx.__aenter__ = AsyncMock(return_value=SimpleNamespace(chromium=SimpleNamespace(
-        launch=AsyncMock(return_value=SimpleNamespace(
-            new_context=AsyncMock(return_value=SimpleNamespace(new_page=AsyncMock(return_value=page))),
+        launch_persistent_context=AsyncMock(return_value=SimpleNamespace(
+            pages=[page],
+            new_page=AsyncMock(return_value=page),
             close=AsyncMock(),
+            cookies=AsyncMock(return_value=[]),
+            clear_cookies=AsyncMock(),
+            add_cookies=AsyncMock(),
         ))
     )))
     ctx.__aexit__ = AsyncMock(return_value=False)
@@ -141,3 +146,62 @@ async def test_run_bypass_follows_multi_hop_ouo_chain():
     with patch("vesper_x.extractors.ouo.async_playwright", _fake_playwright(page)):
         result = await OuoBypasser()._run_playwright_bypass("https://ouo.io/aaa111")
     assert result == urls[-1]
+
+
+@pytest.mark.asyncio
+async def test_bypass_uses_persistent_profile():
+    """링크마다 새 브라우저면 CF가 매번 challenge를 건다 - 전용 프로필을 재사용해
+    cf_clearance 쿠키를 유지한다."""
+    ctx = MagicMock()
+    persistent_mock = AsyncMock(return_value=SimpleNamespace(
+        pages=[_NoOpPageLike()],
+        new_page=AsyncMock(),
+        close=AsyncMock(),
+        cookies=AsyncMock(return_value=[]),
+        clear_cookies=AsyncMock(),
+        add_cookies=AsyncMock(),
+    ))
+    ctx.__aenter__ = AsyncMock(return_value=SimpleNamespace(
+        chromium=SimpleNamespace(launch_persistent_context=persistent_mock)))
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    with patch("vesper_x.extractors.ouo.async_playwright", MagicMock(return_value=ctx)):
+        await OuoBypasser()._run_playwright_bypass("https://ouo.io/abc123")
+    assert persistent_mock.call_args is not None
+    assert persistent_mock.call_args.args  # 프로필 경로 위치 인자
+    assert persistent_mock.call_args.kwargs.get("channel") == "chrome"
+
+
+class _NoOpPageLike:
+    url = "https://ouo.io/abc123"
+    def on(self, *a): pass
+    async def goto(self, *a, **k): pass
+    async def wait_for_timeout(self, ms): pass
+    async def query_selector(self, sel): return None
+
+
+@pytest.mark.asyncio
+async def test_bypass_prunes_cookies_before_goto():
+    """persistent profile에 쿠키가 쌓이면 ouo nginx가 400을 돌려준다 -
+    우회 전 cf_clearance만 남기고 정리한다 (2026-09-07 실측)."""
+    page = FakePage("https://ouo.io/zZz9Zz", "https://download2293.mediafire.com/x/f.rar")
+    ctx = MagicMock()
+    context = SimpleNamespace(
+        pages=[page],
+        new_page=AsyncMock(),
+        close=AsyncMock(),
+        cookies=AsyncMock(return_value=[
+            {"name": "cf_clearance", "value": "tok", "domain": ".ouo.io", "path": "/"},
+            {"name": "ouo_session", "value": "x" * 4000, "domain": ".ouo.io", "path": "/"},
+        ]),
+        clear_cookies=AsyncMock(),
+        add_cookies=AsyncMock(),
+    )
+    ctx.__aenter__ = AsyncMock(return_value=SimpleNamespace(chromium=SimpleNamespace(
+        launch_persistent_context=AsyncMock(return_value=context))))
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    with patch("vesper_x.extractors.ouo.async_playwright", MagicMock(return_value=ctx)):
+        result = await OuoBypasser()._run_playwright_bypass("https://ouo.io/zZz9Zz")
+    context.clear_cookies.assert_awaited_once()
+    kept = context.add_cookies.await_args.args[0]
+    assert [c["name"] for c in kept] == ["cf_clearance"]
+    assert result.endswith("f.rar")

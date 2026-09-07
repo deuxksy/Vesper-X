@@ -112,3 +112,31 @@ def test_dispatch_omits_cookie_header_without_cookies():
             port=6800,
             secret="mysecret",
         )
+
+
+def test_status_summary_counts_by_state():
+    """tell_active/waiting/stopped를 상태별로 집계한다 (waiting+paused/complete/error 분리)."""
+    with patch("vesper_x.dispatchers.aria2.aria2p") as mock_aria2p:
+        client = mock_aria2p.Client.return_value
+        client.tell_active.return_value = [{"status": "active"}] * 3
+        client.tell_waiting.return_value = [
+            {"status": "waiting"}, {"status": "waiting"}, {"status": "paused"},
+        ]
+        client.tell_stopped.return_value = [
+            {"status": "complete"}, {"status": "complete"}, {"status": "error"},
+        ]
+        summary = Aria2Dispatcher(AppConfig()).status_summary()
+    assert summary == {"active": 3, "waiting": 2, "paused": 1, "complete": 2, "error": 1, "total": 9}
+
+
+def test_active_downloads_detail():
+    with patch("vesper_x.dispatchers.aria2.aria2p") as mock_aria2p:
+        client = mock_aria2p.Client.return_value
+        client.tell_active.return_value = [{
+            "files": [{"path": "/downloads/misskon/서안.rar"}],
+            "totalLength": "2097152000",
+            "completedLength": "1048576000",
+            "downloadSpeed": "1572864",
+        }]
+        result = Aria2Dispatcher(AppConfig()).active_downloads()
+    assert result == [{"name": "서안.rar", "total_mb": 2000.0, "done_mb": 1000.0, "speed_mb": 1.5}]

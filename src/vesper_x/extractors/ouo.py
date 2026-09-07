@@ -1,11 +1,16 @@
 import asyncio
 import logging
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
+
+# 우회 전용 Chrome 프로필 - cf_clearance 쿠키가 유지되어 링크마다 새 지문으로
+# 보이는 것을 방지한다 (challenge 빈도 대폭 감소, 2026-09-07)
+OUO_PROFILE_DIR = Path.home() / ".config" / "url-resolver" / "ouo_profile"
 
 TARGET_DOMAINS = ["mediafire.com", "mega.nz", "gofile.io", "pixeldrain.com"]
 
@@ -48,11 +53,20 @@ class OuoBypasser:
             launch_kwargs: dict = {"channel": "chrome", "headless": False}
             if self.proxy:
                 launch_kwargs["proxy"] = {"server": self.proxy}
-            browser = await p.chromium.launch(**launch_kwargs)
-            # UA를 덮어쓰지 않는다 - 가짜 UA(Chrome/120)와 실제 Chrome 바이너리 지문의
+            OUO_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+            context = await p.chromium.launch_persistent_context(str(OUO_PROFILE_DIR), **launch_kwargs)
+            # persistent profile에 쿠키가 쌓이면 ouo nginx가 400
+            # (Request Header Or Cookie Too Large)을 돌려준다 -
+            # cf_clearance만 남기고 정리한다 (2026-09-07 실측)
+            cookies = await context.cookies()
+            keep = [c for c in cookies if c.get("name") == "cf_clearance"]
+            if len(cookies) != len(keep):
+                await context.clear_cookies()
+                if keep:
+                    await context.add_cookies(keep)
+            # UA를 덮어쓰지 않는다 - 가짜 UA(Chrome/120)과 실제 Chrome 바이너리 지문의
             # 불일치가 Cloudflare challenge를 유발한다 (2026-09-05 실측)
-            context = await browser.new_context()
-            page = await context.new_page()
+            page = context.pages[0] if context.pages else await context.new_page()
 
             def check_and_update_url(url: str):
                 nonlocal target_url
@@ -106,7 +120,7 @@ class OuoBypasser:
             except Exception as e:
                 logger.warning(f"Error during Playwright bypass for {short_url}: {e}")
             finally:
-                await browser.close()
+                await context.close()
 
             return target_url
 
