@@ -121,6 +121,7 @@ def build():
     db = sqlite3.connect(DATA_DIR / 'models.db')
     db.executescript("""
 DROP VIEW IF EXISTS v_model_summary;
+DROP TABLE IF EXISTS model_counts;
 DROP TABLE IF EXISTS archive_artists;
 DROP TABLE IF EXISTS model_names;
 DROP TABLE IF EXISTS models;
