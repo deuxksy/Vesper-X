@@ -13,3 +13,13 @@ htmlcov/
 # System
 .DS_Store
 *.log
+
+# Data - TSV 스냅샷은 추적, DB는 스크립트로 재생(scripts/build_models_db.py)
+data/models.db
+data/.omc/
+
+# 다운로드 콘텐츠 (수집 대상 아님)
+downloads/
+
+# OMC 운영 아티팩트
+.omc/
