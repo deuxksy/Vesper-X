@@ -10,20 +10,21 @@
 
 - **Post Parsing**: 지원 대상 웹 아카이브 게시글에서 호스트 다운로드 링크 자동 추출
 - **Shortener Bypass**: 단축링크 및 광고 페이지 Playwright 기반 브라우저 자동 우회
-- **Direct Link Extraction**: 파일 호스트(MediaFire 등) 직링크 자동 변환
+- **Direct Link Extraction**: 파일 호스트(MediaFire, Gofile 등) 직링크 자동 변환
 - **Aria2 Dispatch**: aria2 RPC 데몬 연동 백그라운드 고속 전송
+- **Model Registry**: models.db 기반 모델명 통일·사이트별 보유/아카이브 현황 조회 (`vesper models`)
 
 ---
 
 ## 🏗️ 아키텍처 및 파이프라인
 
 ```mermaid
-flowchart LR
-    URL["CLI 입력 URL"] --> Fetcher["BrowserFetcher<br>(Chrome ECH + DoH)"]
-    Fetcher --> Parser["Crawler / Parser<br>(게시글 & 호스트 링크 파싱)"]
-    Parser --> Bypasser["Shortener Bypasser<br>(Playwright 단축링크/광고 우회)"]
-    Bypasser --> Resolver["Host Resolver<br>(MediaFire 직링크 변환)"]
-    Resolver --> Dispatcher["Aria2Dispatcher<br>(원격 aria2 RPC 전송)"]
+graph LR
+    URL[CLI 입력 URL] --> Fetcher[BrowserFetcher - proxy + Chrome]
+    Fetcher --> Parser[Crawler / Parser - 게시글 및 호스트 링크 파싱]
+    Parser --> Bypasser[Shortener Bypasser - ouo real Chrome headed]
+    Bypasser --> Resolver[Host Resolver - MediaFire Gofile 직링크]
+    Resolver --> Dispatcher[Aria2Dispatcher - 원격 aria2 RPC 전송]
 ```
 
 ---
@@ -32,7 +33,7 @@ flowchart LR
 
 ```bash
 uv sync
-uv run playwright install chromium   # 단축링크 자동 우회용 브라우저 설치
+uv run playwright install chromium   # gofile 캡처용 (ouo/misskon은 실제 Chrome 사용)
 ```
 
 요구사항: Python 3.12+, aria2 RPC daemon (`~/.config/url-resolver/config.toml`)
@@ -56,6 +57,11 @@ uv run vesper crawl "https://example-archive.com/category/model-name/" --pages 2
 uv run vesper clip
 ```
 
+### 4. 모델 조회 (사이트 보유량 + 내 아카이브 현황)
+```bash
+uv run vesper models zinieq
+```
+
 ---
 
 ## 📚 문서 및 안내 (Documentation & Diátaxis Index)
@@ -65,7 +71,7 @@ uv run vesper clip
 | **🚀 Tutorials (튜토리얼)** | [📦 설치 및 시작하기](#-설치) | 패키지 동기화 및 단축링크 우회 브라우저 초기 설정 |
 | **🛠️ How-To Guides (가이드)** | [💻 핵심 사용법](#-사용법) | 단일 파싱, 태그별 연속 크롤링, 클립보드 즉시 처리 절차 |
 | **📖 Reference (참고자료)** | [CLI 명령어 명세](#-사용법) | `vesper` CLI 서브커맨드(`parse`, `crawl`, `clip`) 규격 |
-| **💡 Explanation (설명/원리)** | [🏗️ 아키텍처 및 파이프라인](#️-아키텍처-및-파이프라인)<br>[🗺️ ROADMAP.md](ROADMAP.md) | ECH/DoH 네트워크 파이프라인 동작 원리 및 중장기 확장 로드맵 |
+| **💡 Explanation (설명/원리)** | [🏗️ 아키텍처 및 파이프라인](#️-아키텍처-및-파이프라인)<br>[🗺️ ROADMAP.md](ROADMAP.md) | 프록시/Chrome 우회 파이프라인 동작 원리 및 중장기 확장 로드맵 |
 
 ---
 

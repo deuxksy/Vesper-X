@@ -41,8 +41,7 @@
   - Google DNS (`https://dns.google/dns-query`)
   - Cloudflare DNS (`https://cloudflare-dns.com/dns-query`)
   - Quad9 DNS (`https://dns.quad9.net/dns-query`)
-- [ ] **프록시(Proxy) 체이닝 및 SOCKS5 지원**:
-  - 전역/사이트별 SOCKS5/HTTP 프록시 설정 지원으로 VPN 없이도 특정 국가/지역 제한 사이트 파싱 가능화
+- [x] **프록시(Proxy) 체이닝 및 SOCKS5 지원**: ✅ 2026-09 달성 — brla gluetun(Surfshark SG WireGuard) HTTP 프록시로 전 fetch 경로 통일, 한국 SNI/NextDNS/geo 차단 해소
 - [ ] **Chrome ECH (Encrypted Client Hello) 프로파일 최적화**: TLS 핸드셰이크 차단 원천 무력화
 
 ---
