@@ -14,9 +14,11 @@ NOISE = {'ai art', 'unknown cosplayer', 'xiuren秀人网', 'pure media', 'fantas
          'djawa photo', 'photochips', 'artgravia', 'sweetbox', 'leehee express',
          'moon night snap', 'bimilstory', 'atfm', 'heroine k'}
 
-# 간체/번체 등 토큰 매칭이 못 묶는 알려진 쌍: (misskon 표기, cosplaytele 표기)
+# 간체/번체, roman-only/CJK-only 등 토큰 매칭이 못 묶는 알려진 쌍:
+# (misskon 캐노니컬, cosplaytele 변형들)
 MANUAL_MATCHES = {
     "白银81": ("白銀81 (81silver811)",),
+    "日奈娇": ("Rinaijiao", "Rinaijiao-(日奈娇)"),
 }
 
 
@@ -46,6 +48,7 @@ def build():
     db = sqlite3.connect(DATA_DIR / 'models.db')
     db.executescript("""
 DROP VIEW IF EXISTS v_model_summary;
+DROP TABLE IF EXISTS archive_artists;
 DROP TABLE IF EXISTS model_names;
 DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS sites;
@@ -56,12 +59,23 @@ CREATE TABLE model_names (
     PRIMARY KEY (site_id, variant),
     FOREIGN KEY (site_id) REFERENCES sites(id),
     FOREIGN KEY (model_id) REFERENCES models(id));
+CREATE TABLE archive_artists (
+    model_id INT, region TEXT, folder_name TEXT, album_count INT, size_kb INT,
+    PRIMARY KEY (folder_name),
+    FOREIGN KEY (model_id) REFERENCES models(id));
 CREATE VIEW v_model_summary AS
 SELECT m.id, m.canonical_name, m.is_aggregator,
        COALESCE(SUM(CASE WHEN mn.site_id=1 THEN mn.post_count END), 0) AS misskon,
        COALESCE(SUM(CASE WHEN mn.site_id=2 THEN mn.post_count END), 0) AS cosplaytele,
-       COUNT(DISTINCT mn.site_id) AS sites_present
-FROM models m LEFT JOIN model_names mn ON mn.model_id = m.id
+       COUNT(DISTINCT mn.site_id) AS sites_present,
+       COALESCE(ar.albums, 0) AS owned_albums,
+       ROUND(COALESCE(ar.size_kb, 0) / 1048576.0, 1) AS owned_gb,
+       ar.regions
+FROM models m
+LEFT JOIN model_names mn ON mn.model_id = m.id
+LEFT JOIN (SELECT model_id, SUM(album_count) AS albums, SUM(size_kb) AS size_kb,
+                  GROUP_CONCAT(DISTINCT region) AS regions
+           FROM archive_artists GROUP BY model_id) ar ON ar.model_id = m.id
 GROUP BY m.id;
 """)
     db.execute("INSERT INTO sites VALUES (1, 'misskon.com', ?, '/tag/cosplay/ 전수 워크')",
@@ -100,6 +114,30 @@ GROUP BY m.id;
                         break
         mid = model_id(target if target else cname, is_agg)
         db.execute("INSERT OR REPLACE INTO model_names VALUES (?,?,?,?,?)", (2, mid, cname, cnt, None))
+
+    # 4. heritage 아카이브: 폴더명(roman (native))을 기존 변형에 매칭, 미매칭은 새 캐노니컬
+    ar_path = DATA_DIR / 'heritage_archive_census.tsv'
+    if ar_path.exists():
+        all_variants = db.execute(
+            "SELECT mn.variant, mn.model_id FROM model_names mn "
+            "JOIN models m ON m.id = mn.model_id WHERE m.is_aggregator = 0"
+        ).fetchall()
+        var_tok = [(v, mid, tokens(v), flat(v)) for v, mid in all_variants]
+        # 수동 쌍 미리 매핑 (heritage 폴더명이 아니라 변형 매칭에도 반영되도록
+        # cosplaytele 변형 삽입 시 이미 MANUAL_MATCHES가 적용된 상태다)
+        for line in open(ar_path):
+            region, folder, albums, kb = line.rstrip('\n').split('\t')
+            (fr, fc), ff = tokens(folder), flat(folder)
+            target_mid = None
+            for _v, mid, (vr, vc), vf in var_tok:
+                if ((fc and vc and (fc & vc)) or (fr and vr and (fr & vr)) or
+                        (len(ff) >= 4 and len(vf) >= 4 and (ff in vf or vf in ff))):
+                    target_mid = mid
+                    break
+            if target_mid is None:
+                target_mid = model_id(folder)
+            db.execute("INSERT OR REPLACE INTO archive_artists VALUES (?,?,?,?,?)",
+                       (target_mid, region, folder, int(albums), int(kb)))
 
     db.commit()
     n = db.execute("SELECT COUNT(*) FROM model_names").fetchone()[0]
