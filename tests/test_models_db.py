@@ -120,3 +120,16 @@ def test_set_grade_and_lookup(db_path):
 def test_set_grade_without_db_noop(tmp_path):
     reg = ModelRegistry(tmp_path / "nope.db")
     reg.set_grade("byoru", "A")  # 예외 없이
+
+
+def test_dispatch_log_records_model_id(db_path):
+    reg = ModelRegistry(db_path)
+    reg.set_grade("byoru", "A")
+    reg.record_dispatch("https://misskon.com/post-x/", note="set.rar",
+                        direct_url="https://www.mediafire.com/file/abc",
+                        model_name="Byoru")
+    row = reg._connect().execute(
+        "SELECT model_id FROM dispatch_log WHERE url='https://misskon.com/post-x/'").fetchone()
+    expected = reg._connect().execute(
+        "SELECT id FROM models WHERE canonical_name='Byoru'").fetchone()[0]
+    assert row[0] == expected

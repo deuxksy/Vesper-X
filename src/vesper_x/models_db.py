@@ -83,7 +83,13 @@ class ModelRegistry:
             url TEXT PRIMARY KEY,
             dispatched_at TEXT DEFAULT (datetime('now')),
             note TEXT,
-            direct_url TEXT)""")
+            direct_url TEXT,
+            model_id INTEGER)""")
+        # 기존 테이블 컬럼 마이그레이션
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(dispatch_log)")}
+        for col in ("direct_url", "model_id"):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE dispatch_log ADD COLUMN {col} TEXT")
 
     def is_dispatched(self, url: str) -> bool:
         """이미 aria2에 전송한 post URL인지 - 재크롤 중복 스킵용."""
@@ -94,13 +100,17 @@ class ModelRegistry:
         return conn.execute("SELECT 1 FROM dispatch_log WHERE url = ?", (url,)).fetchone() is not None
 
     def record_dispatch(self, url: str, note: Optional[str] = None,
-                        direct_url: Optional[str] = None) -> None:
+                        direct_url: Optional[str] = None,
+                        model_name: Optional[str] = None) -> None:
         conn = self._connect()
         if conn is None:
             return
         self._ensure_dispatch_log(conn)
-        conn.execute("INSERT OR REPLACE INTO dispatch_log (url, note, direct_url) VALUES (?, ?, ?)",
-                     (url, note, direct_url))
+        model_id = None
+        if model_name:
+            model_id = self._resolve_model_id(model_name)
+        conn.execute("INSERT OR REPLACE INTO dispatch_log (url, note, direct_url, model_id) VALUES (?, ?, ?, ?)",
+                     (url, note, direct_url, model_id))
         conn.commit()
 
     def set_grade(self, slug: str, grade: str) -> None:
