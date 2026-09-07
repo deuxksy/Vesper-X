@@ -391,10 +391,12 @@ def _live_heritage_counts(info: dict) -> dict:
     for folder in info["archive"]["folders"]:
         try:
             import shlex
+            # folder는 region 하부 상대경로(a/AikoUwU) - 직접 경로 조합
+            region = (info["archive"]["region"] or "ETC").split(",")[0]
+            path = f"/mnt/data2/torrent/downloads/aria/{region}/{folder}"
             r = subprocess.run(
                 ["ssh", "-o", "ConnectTimeout=10", "media@heritage",
-                 f"p=$(find /mnt/data2/torrent/downloads/aria -maxdepth 3 -type d -name {shlex.quote(folder)} | head -1); "
-                 f"[ -n \"$p\" ] && find \"$p\" -mindepth 1 -maxdepth 1 -type d | wc -l && du -sk \"$p\" | cut -f1"],
+                 f"d={shlex.quote(path)}; [ -d \"$d\" ] && find \"$d\" -mindepth 1 -maxdepth 1 -type d | wc -l && du -sk \"$d\" | cut -f1"],
                 capture_output=True, text=True, timeout=30)
             out = r.stdout.split()
             if len(out) >= 2:
