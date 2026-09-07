@@ -82,7 +82,8 @@ class ModelRegistry:
         conn.execute("""CREATE TABLE IF NOT EXISTS dispatch_log (
             url TEXT PRIMARY KEY,
             dispatched_at TEXT DEFAULT (datetime('now')),
-            note TEXT)""")
+            note TEXT,
+            direct_url TEXT)""")
 
     def is_dispatched(self, url: str) -> bool:
         """이미 aria2에 전송한 post URL인지 - 재크롤 중복 스킵용."""
@@ -92,12 +93,14 @@ class ModelRegistry:
         self._ensure_dispatch_log(conn)
         return conn.execute("SELECT 1 FROM dispatch_log WHERE url = ?", (url,)).fetchone() is not None
 
-    def record_dispatch(self, url: str, note: Optional[str] = None) -> None:
+    def record_dispatch(self, url: str, note: Optional[str] = None,
+                        direct_url: Optional[str] = None) -> None:
         conn = self._connect()
         if conn is None:
             return
         self._ensure_dispatch_log(conn)
-        conn.execute("INSERT OR REPLACE INTO dispatch_log (url, note) VALUES (?, ?)", (url, note))
+        conn.execute("INSERT OR REPLACE INTO dispatch_log (url, note, direct_url) VALUES (?, ?, ?)",
+                     (url, note, direct_url))
         conn.commit()
 
     def set_grade(self, slug: str, grade: str) -> None:
@@ -107,6 +110,25 @@ class ModelRegistry:
             return
         conn.execute("UPDATE models SET grade = ? WHERE slug = ?", (grade, slug))
         conn.commit()
+
+    def list_by_grade(self, grade: str) -> list[dict]:
+        """해당 등급 모델 목록 (slug/캐노니컬/진입 URL) - sync 명령용."""
+        conn = self._connect()
+        if conn is None:
+            return []
+        result = []
+        for mid, canonical, slug in conn.execute(
+                "SELECT id, canonical_name, slug FROM models WHERE grade = ? "
+                "AND is_aggregator = 0 ORDER BY canonical_name", (grade,)):
+            entry = None
+            for site_id, cnt, url in conn.execute(
+                    "SELECT site_id, post_count, slug_url FROM model_names "
+                    "WHERE model_id = ? AND slug_url IS NOT NULL", (mid,)):
+                if url and (entry is None or cnt > entry[0]):
+                    entry = (cnt, url)
+            result.append({"slug": slug, "canonical": canonical,
+                           "entry_url": entry[1] if entry else None})
+        return result
 
     def canonicalize(self, name: str) -> Optional[str]:
         """변형 이름 → 캐노니컬 이름. 미매칭/DB 없음 → None."""
@@ -134,6 +156,7 @@ class ModelRegistry:
             (model_id,)).fetchone()
 
         snapshot = {"misskon": 0, "cosplaytele": 0}
+        entry_urls = {}  # (site_id, count, url) - 진입 URL은 포스트 수 많은 사이트 것
         misskon_slug = None
         for site_id, cnt, slug_url in conn.execute(
                 "SELECT site_id, post_count, slug_url FROM model_names WHERE model_id = ?",
@@ -141,8 +164,17 @@ class ModelRegistry:
             if site_id == 1:
                 snapshot["misskon"] += cnt
                 misskon_slug = slug_url or misskon_slug
+                if slug_url:
+                    entry_urls[1] = (cnt, slug_url)
             elif site_id == 2:
                 snapshot["cosplaytele"] += cnt
+                if slug_url:
+                    entry_urls[2] = (cnt, slug_url)
+        # 진입 URL 도출: 포스트 수 많은 사이트 (동점이면 cosplaytele)
+        entry_url = None
+        if entry_urls:
+            best_site = max(entry_urls, key=lambda k: (entry_urls[k][0], k == 2))
+            entry_url = entry_urls[best_site][1]
 
         archive = {"albums": 0, "size_kb": 0, "region": None, "folders": []}
         for region, folder, albums, size_kb in conn.execute(
@@ -153,11 +185,14 @@ class ModelRegistry:
             archive["region"] = region if archive["region"] is None else f"{archive['region']},{region}"
             archive["folders"].append(folder)
 
+        ct_url = entry_urls.get(2, (0, None))[1]
         return {
             "canonical": canonical,
             "slug": slug,
             "grade": grade,
+            "entry_url": entry_url,
             "misskon_slug": misskon_slug,
+            "cosplaytele_url": ct_url,
             "snapshot": snapshot,
             "archive": archive,
         }

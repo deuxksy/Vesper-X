@@ -94,3 +94,33 @@ def test_status_command_prints_summary_and_active():
     assert "전체 4" in result.output
     assert "50.0%" in result.output
     assert "서안.rar" in result.output
+
+
+def test_sync_command_crawls_all_a_grade_models():
+    """vesper sync: A급 모델 전원의 entry_url로 crawl을 돈다."""
+    from vesper_x.cli import app as cli_app
+
+    registry = MagicMock()
+    registry.list_by_grade.return_value = [
+        {"slug": "machi", "canonical": "Machi馬吉", "entry_url": "https://cosplaytele.com/category/machi/"},
+        {"slug": "ovo-yaokoututu", "canonical": "咬一口兔娘ovo", "entry_url": "https://cosplaytele.com/category/sticky-bunny/"},
+    ]
+    with patch("vesper_x.cli.ModelRegistry", return_value=registry), \
+         patch("vesper_x.cli.run_crawl") as mock_crawl:
+        result = runner.invoke(cli_app, ["sync"])
+    assert result.exit_code == 0
+    assert mock_crawl.call_count == 2
+    urls = [c.args[0] for c in mock_crawl.call_args_list]
+    assert "https://cosplaytele.com/category/machi/" in urls
+    assert "https://cosplaytele.com/category/sticky-bunny/" in urls
+
+
+def test_sync_command_no_a_grade_models():
+    from vesper_x.cli import app as cli_app
+    registry = MagicMock()
+    registry.list_by_grade.return_value = []
+    with patch("vesper_x.cli.ModelRegistry", return_value=registry), \
+         patch("vesper_x.cli.run_crawl") as mock_crawl:
+        result = runner.invoke(cli_app, ["sync"])
+    assert result.exit_code == 0
+    mock_crawl.assert_not_called()

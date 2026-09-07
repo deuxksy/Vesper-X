@@ -392,7 +392,7 @@ def _live_heritage_counts(info: dict) -> dict:
             import shlex
             r = subprocess.run(
                 ["ssh", "-o", "ConnectTimeout=10", "media@heritage",
-                 f"p=$(find /mnt/data2/torrent/downloads/aria -maxdepth 2 -type d -name {shlex.quote(folder)} | head -1); "
+                 f"p=$(find /mnt/data2/torrent/downloads/aria -maxdepth 3 -type d -name {shlex.quote(folder)} | head -1); "
                  f"[ -n \"$p\" ] && find \"$p\" -mindepth 1 -maxdepth 1 -type d | wc -l && du -sk \"$p\" | cut -f1"],
                 capture_output=True, text=True, timeout=30)
             out = r.stdout.split()
@@ -431,17 +431,19 @@ def models(
     gb = heritage_live["size_kb"] / 1024 / 1024
     console.print(f"  heritage      [magenta]{heritage_live['albums']}앨범 / {gb:.1f}GB[/magenta]  [{info['archive']['region'] or '-'}]")
 
-    # 추천: 실시간 수가 많은 쪽 (실패 시 스냅샷으로)
+    # 추천: 실시간 수가 많은 쪽 (실패 시 스냅샷으로), 진입 URL은 model_names에서 도출
     mk_n = mk_live if mk_live is not None else snap["misskon"]
     ct_n = ct_live if ct_live is not None else snap["cosplaytele"]
     if mk_n == 0 and ct_n == 0:
         console.print("  [yellow]두 사이트 모두 보유 없음[/yellow]")
-    elif mk_n >= ct_n:
+        return
+    site = "misskon" if mk_n >= ct_n else "cosplaytele"
+    n = max(mk_n, ct_n)
+    if site == "misskon":
         entry = info.get("misskon_slug") or f"https://misskon.com/tag/{info['slug']}/"
-        console.print(f"  [green]→ 추천: misskon ({mk_n}편)[/green]  진입: {entry}")
     else:
-        entry = f"https://cosplaytele.com/?s={urllib.parse.quote(info['canonical'])}"
-        console.print(f"  [green]→ 추천: cosplaytele ({ct_n}편)[/green]  진입: {entry}")
+        entry = info.get("cosplaytele_url") or f"https://cosplaytele.com/?s={urllib.parse.quote(info['canonical'])}"
+    console.print(f"  [green]→ 추천: {site} ({n}편)[/green]  진입: {entry}")
 
 
 @app.command()
@@ -472,15 +474,9 @@ def parse(
     handle_results(metadata_list, extract_only=extract_only, output=output, copy=copy, json_output=json_output)
 
 
-@app.command()
-def crawl(
-    url: str = typer.Argument(..., help="Category or Tag list URL"),
-    pages: int = typer.Option(1, "--pages", help="Max pages to crawl (0 for all)"),
-    limit: int = typer.Option(0, "--limit", help="Max posts to process (0 for all)"),
-    extract_only: bool = typer.Option(False, "--extract-only", help="Extract direct URL without dispatching to aria2"),
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="Save extracted URLs to file"),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON format"),
-):
+def run_crawl(url: str, pages: int = 1, limit: int = 0, extract_only: bool = False,
+              output: Optional[str] = None, json_output: bool = False,
+              config: Optional[AppConfig] = None):
     """Crawl category or tag listing across multiple pages and process all posts.
 
     페이지를 페치할 때마다 해당 post를 즉시 resolve+dispatch 한다 (최신 페이지 우선, 스트리밍)."""
@@ -546,7 +542,7 @@ def crawl(
                             gid = dispatcher.dispatch(m)
                             console.print(f"[bold green]Dispatched to aria2[/bold green] (GID: [cyan]{gid}[/cyan]) - {m.filename or m.direct_url[:60]}")
                             console.print(f"[dim]  [aria2] {dispatcher.format_status(dispatcher.status_summary())}[/dim]")
-                            registry.record_dispatch(post_url, note=m.filename)
+                            registry.record_dispatch(post_url, note=m.filename, direct_url=m.direct_url)
                         except Exception as e:
                             console.print(f"[bold red]Failed to dispatch to aria2: {e}[/bold red]")
 
@@ -560,6 +556,43 @@ def crawl(
 
     # dispatch는 위에서 이미 처리 - 출력/저장만
     handle_results(all_metadata, extract_only=True, output=output, copy=False, json_output=json_output, config=config)
+
+
+@app.command()
+def crawl(
+    url: str = typer.Argument(..., help="Category or Tag list URL"),
+    pages: int = typer.Option(1, "--pages", help="Max pages to crawl (0 for all)"),
+    limit: int = typer.Option(0, "--limit", help="Max posts to process (0 for all)"),
+    extract_only: bool = typer.Option(False, "--extract-only", help="Extract direct URL without dispatching to aria2"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="Save extracted URLs to file"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON format"),
+):
+    """Crawl category or tag listing across multiple pages and process all posts."""
+    run_crawl(url, pages=pages, limit=limit, extract_only=extract_only,
+              output=output, json_output=json_output)
+
+
+@app.command()
+def sync(
+    grade: str = typer.Option("A", "--grade", help="동기화할 모델 등급 (기본 A)"),
+    pages: int = typer.Option(1, "--pages", help="모델당 크롤 페이지 수"),
+):
+    """등급별 모델 동기화: entry URL로 신규 post를 크롤+dispatch (dispatch_log 중복 스킵)."""
+    registry = ModelRegistry()
+    models = registry.list_by_grade(grade)
+    if not models:
+        console.print(f"[yellow]'{grade}' 등급 모델이 없습니다[/yellow]")
+        return
+    console.print(f"[bold]{grade}급 {len(models)}명 동기화 시작[/bold]")
+    for m in models:
+        if not m["entry_url"]:
+            console.print(f"[yellow]skip (진입 URL 없음): {m['canonical']}[/yellow]")
+            continue
+        console.print(f"[bold cyan]== {m['canonical']} ==[/bold cyan]  {m['entry_url']}")
+        try:
+            run_crawl(m["entry_url"], pages=pages)
+        except Exception as e:
+            console.print(f"[bold red]sync 실패 {m['canonical']}: {e}[/bold red]")
 
 
 @app.command()

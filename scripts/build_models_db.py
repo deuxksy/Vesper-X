@@ -21,6 +21,7 @@ MANUAL_MERGES = [
     ("yuuhui玉汇", "Kokuhui"),
     ("铃木美咲", "Misaki Sai"),
     ("咬一口兔娘ovo (Yaokoututu)", "咬一口兔娘ovo"),
+    ("黏黏团子兔", "咬一口兔娘ovo (Yaokoututu)"),  # 동일인 - 2026-09-07 사용자 확정
     ("前羽_rr", "前羽rr"),
     ("Neko薇薇", "Neko-薇薇"),
     ("Zia (지아)", "Jia (지아)"),
@@ -62,19 +63,19 @@ def load():
 
 
 def _existing_model_prefs(db_path) -> dict:
-    """재빌드 전 기존 DB에서 수동 지정(등급/크롤 URL/국적)을 백업한다."""
+    """재빌드 전 기존 DB에서 수동 지정(등급/국적)을 백업한다."""
     prefs = {}
     if db_path.exists():
         old = sqlite3.connect(db_path)
         try:
-            for slug, grade, crawl_url, region in old.execute(
-                    "SELECT slug, grade, crawl_url, region FROM models "
-                    "WHERE grade IS NOT NULL OR crawl_url IS NOT NULL OR region IS NOT NULL"):
-                prefs[slug] = (grade, crawl_url, region)
+            for slug, grade, region in old.execute(
+                    "SELECT slug, grade, region FROM models "
+                    "WHERE grade IS NOT NULL OR region IS NOT NULL"):
+                prefs[slug] = (grade, region)
         except sqlite3.OperationalError:
             try:
                 for slug, grade in old.execute("SELECT slug, grade FROM models WHERE grade IS NOT NULL"):
-                    prefs[slug] = (grade, None, None)
+                    prefs[slug] = (grade, None)
             except sqlite3.OperationalError:
                 pass
         old.close()
@@ -93,20 +94,25 @@ def infer_region(name: str):
     return None
 
 
-def derive_grade(misskon: int, cosplaytele: int, owned: int) -> str:
-    """보유(행동) 기반 초기 등급 - 수동 조정은 set_grade로 덮어쓴다."""
+def derive_grade(misskon: int, cosplaytele: int, owned: int, region: str = None) -> str:
+    """보유(행동) 기반 초기 등급 - 수동 조정은 preserved로 덮어쓴다.
+    정책: 한국 국적 모델은 최소 C (2026-09-07 사용자 확정)."""
     available = misskon + cosplaytele
     if owned >= 30:
-        return "A"
-    if owned >= 10:
-        return "B"
-    if owned >= 3:
-        return "C"
-    if owned >= 1:
-        return "D"
-    if available >= 10:
-        return "E"
-    return "F"
+        grade = "A"
+    elif owned >= 10:
+        grade = "B"
+    elif owned >= 3:
+        grade = "C"
+    elif owned >= 1:
+        grade = "D"
+    elif available >= 10:
+        grade = "E"
+    else:
+        grade = "F"
+    if region == "KOR" and grade > "C":
+        grade = "C"
+    return grade
 
 
 def build():
@@ -120,7 +126,7 @@ DROP TABLE IF EXISTS model_names;
 DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS sites;
 CREATE TABLE sites (id INTEGER PRIMARY KEY, domain TEXT UNIQUE, census_date TEXT, note TEXT);
-CREATE TABLE models (id INTEGER PRIMARY KEY, canonical_name TEXT UNIQUE, slug TEXT UNIQUE, grade TEXT, crawl_url TEXT, region TEXT, is_aggregator INTEGER DEFAULT 0);
+CREATE TABLE models (id INTEGER PRIMARY KEY, canonical_name TEXT UNIQUE, slug TEXT UNIQUE, grade TEXT, region TEXT, is_aggregator INTEGER DEFAULT 0);
 CREATE TABLE model_names (
     site_id INT, model_id INT, variant TEXT, post_count INT, slug_url TEXT,
     PRIMARY KEY (site_id, variant),
@@ -271,21 +277,15 @@ GROUP BY m.id;
     for model_id, slug, misskon, cosplaytele, owned, name in db.execute("""
             SELECT m.id, m.slug, v.misskon, v.cosplaytele, v.owned_albums, m.canonical_name
             FROM v_model_summary v JOIN models m ON m.id = v.id""").fetchall():
-        grade, crawl_url, region = preserved.get(slug, (None, None, None))
-        grade = grade or derive_grade(misskon, cosplaytele, owned)
-        if crawl_url is None:
-            crawl_url = ct_urls.get(model_id)
-            if crawl_url is None:
-                row = db.execute("SELECT slug_url FROM model_names WHERE model_id=? AND slug_url IS NOT NULL LIMIT 1",
-                                 (model_id,)).fetchone()
-                crawl_url = row[0] if row else None
+        grade, region = preserved.get(slug, (None, None))
         if region is None and model_id in heritage_regions:
             regions = heritage_regions[model_id]
             region = max(set(regions), key=regions.count)
         if region is None:
             region = infer_region(name)
-        db.execute("UPDATE models SET grade = ?, crawl_url = ?, region = ? WHERE id = ?",
-                   (grade, crawl_url, region, model_id))
+        grade = grade or derive_grade(misskon, cosplaytele, owned, region)
+        db.execute("UPDATE models SET grade = ?, region = ? WHERE id = ?",
+                   (grade, region, model_id))
 
     db.commit()
     n = db.execute("SELECT COUNT(*) FROM model_names").fetchone()[0]
