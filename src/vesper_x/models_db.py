@@ -78,6 +78,36 @@ class ModelRegistry:
                 return model_id
         return None
 
+    def _ensure_dispatch_log(self, conn: sqlite3.Connection) -> None:
+        conn.execute("""CREATE TABLE IF NOT EXISTS dispatch_log (
+            url TEXT PRIMARY KEY,
+            dispatched_at TEXT DEFAULT (datetime('now')),
+            note TEXT)""")
+
+    def is_dispatched(self, url: str) -> bool:
+        """이미 aria2에 전송한 post URL인지 - 재크롤 중복 스킵용."""
+        conn = self._connect()
+        if conn is None:
+            return False
+        self._ensure_dispatch_log(conn)
+        return conn.execute("SELECT 1 FROM dispatch_log WHERE url = ?", (url,)).fetchone() is not None
+
+    def record_dispatch(self, url: str, note: Optional[str] = None) -> None:
+        conn = self._connect()
+        if conn is None:
+            return
+        self._ensure_dispatch_log(conn)
+        conn.execute("INSERT OR REPLACE INTO dispatch_log (url, note) VALUES (?, ?)", (url, note))
+        conn.commit()
+
+    def set_grade(self, slug: str, grade: str) -> None:
+        """모델 등급(A~F) 수동 지정 - build 시 보존된다."""
+        conn = self._connect()
+        if conn is None:
+            return
+        conn.execute("UPDATE models SET grade = ? WHERE slug = ?", (grade, slug))
+        conn.commit()
+
     def canonicalize(self, name: str) -> Optional[str]:
         """변형 이름 → 캐노니컬 이름. 미매칭/DB 없음 → None."""
         conn = self._connect()
@@ -99,8 +129,8 @@ class ModelRegistry:
         if model_id is None:
             return None
 
-        canonical, slug = conn.execute(
-            "SELECT canonical_name, COALESCE(slug, '') FROM models WHERE id = ?",
+        canonical, slug, grade = conn.execute(
+            "SELECT canonical_name, COALESCE(slug, ''), COALESCE(grade, '') FROM models WHERE id = ?",
             (model_id,)).fetchone()
 
         snapshot = {"misskon": 0, "cosplaytele": 0}
@@ -126,6 +156,7 @@ class ModelRegistry:
         return {
             "canonical": canonical,
             "slug": slug,
+            "grade": grade,
             "misskon_slug": misskon_slug,
             "snapshot": snapshot,
             "archive": archive,

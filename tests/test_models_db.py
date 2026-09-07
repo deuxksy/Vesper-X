@@ -8,7 +8,7 @@ from vesper_x.models_db import ModelRegistry
 
 SCHEMA = """
 CREATE TABLE sites (id INTEGER PRIMARY KEY, domain TEXT UNIQUE, census_date TEXT, note TEXT);
-CREATE TABLE models (id INTEGER PRIMARY KEY, canonical_name TEXT UNIQUE, slug TEXT UNIQUE, is_aggregator INTEGER DEFAULT 0);
+CREATE TABLE models (id INTEGER PRIMARY KEY, canonical_name TEXT UNIQUE, slug TEXT UNIQUE, grade TEXT, is_aggregator INTEGER DEFAULT 0);
 CREATE TABLE model_names (site_id INT, model_id INT, variant TEXT, post_count INT, slug_url TEXT,
     PRIMARY KEY (site_id, variant));
 CREATE TABLE archive_artists (model_id INT, region TEXT, folder_name TEXT, album_count INT, size_kb INT);
@@ -22,13 +22,13 @@ def db_path(tmp_path) -> Path:
     db.execute("INSERT INTO sites VALUES (1, 'misskon.com', '2026-09-07', '')")
     db.execute("INSERT INTO sites VALUES (2, 'cosplaytele.com', '2026-09-07', '')")
     # 캐노니컬 Byoru: misskon 61 + cosplaytele 변형 2개(196+24) + heritage 보유
-    db.execute("INSERT INTO models VALUES (10, 'Byoru', 'byoru', 0)")
+    db.execute("INSERT INTO models VALUES (10, 'Byoru', 'byoru', NULL, 0)")
     db.execute("INSERT INTO model_names VALUES (1, 10, 'Byoru', 61, 'https://misskon.com/tag/byoru/')")
     db.execute("INSERT INTO model_names VALUES (2, 10, 'Byoru (ビョル)', 196, NULL)")
     db.execute("INSERT INTO model_names VALUES (2, 10, 'Byoru', 24, NULL)")
     db.execute("INSERT INTO archive_artists VALUES (10, 'SEA', 'Byoru (ビョル)', 57, 113000)")
     # 캐노니컬 日奈娇: roman 변형 포함
-    db.execute("INSERT INTO models VALUES (11, '日奈娇', 'rinaijiao', 0)")
+    db.execute("INSERT INTO models VALUES (11, '日奈娇', 'rinaijiao', NULL, 0)")
     db.execute("INSERT INTO model_names VALUES (1, 11, '日奈娇', 49, 'https://misskon.com/tag/rinaijiao/')")
     db.execute("INSERT INTO model_names VALUES (2, 11, 'Rinaijiao-(日奈娇)', 35, NULL)")
     db.commit()
@@ -88,10 +88,35 @@ def test_generic_words_do_not_bridge_models(db_path):
     """"cosplayer" 같은 일반 단어가 다른 모델과 매칭을 만들면 안 된다."""
     db = sqlite3.connect(db_path)
     # ZinieQ 변형 추가: "ZinieQ (ジニCosplayer)" - roman 토큰에 cosplayer 포함
-    db.execute("INSERT INTO models VALUES (12, 'ZinieQ', 'zinieq', 0)")
+    db.execute("INSERT INTO models VALUES (12, 'ZinieQ', 'zinieq', NULL, 0)")
     db.execute("INSERT INTO model_names VALUES (2, 12, 'ZinieQ (ジニCosplayer)', 80, NULL)")
     db.commit()
     db.close()
     reg = ModelRegistry(db_path)
     assert reg.canonicalize("ZinieQ (ジニCosplayer)") == "ZinieQ"
     assert reg.canonicalize("Unknown Cosplayer") is None
+
+
+def test_dispatch_log_records_and_queries(db_path):
+    """dispatch_log: URL 등록 후 is_dispatched True, 미등록 False."""
+    reg = ModelRegistry(db_path)
+    assert reg.is_dispatched("https://misskon.com/post-1/") is False
+    reg.record_dispatch("https://misskon.com/post-1/", note="machi set")
+    assert reg.is_dispatched("https://misskon.com/post-1/") is True
+
+
+def test_dispatch_log_without_db_is_noop(tmp_path):
+    reg = ModelRegistry(tmp_path / "nope.db")
+    assert reg.is_dispatched("https://misskon.com/x/") is False
+    reg.record_dispatch("https://misskon.com/x/")  # 예외 없이 no-op
+
+
+def test_set_grade_and_lookup(db_path):
+    reg = ModelRegistry(db_path)
+    reg.set_grade("byoru", "A")
+    assert reg.lookup("byoru")["grade"] == "A"
+
+
+def test_set_grade_without_db_noop(tmp_path):
+    reg = ModelRegistry(tmp_path / "nope.db")
+    reg.set_grade("byoru", "A")  # 예외 없이

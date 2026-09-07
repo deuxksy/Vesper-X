@@ -77,3 +77,20 @@ def test_resolve_post_canonicalizes_model_variants():
          patch("vesper_x.extractors.mediafire.MediafireResolver.extract_direct_url", return_value="https://download.mediafire.net/x/u.rar"):
         results = resolve_post("https://cosplaytele.com/umeko-post/", fetcher=fetcher)
     assert results[0].models == ["UmekoJ"]
+
+
+def test_status_command_prints_summary_and_active():
+    from types import SimpleNamespace
+    from vesper_x.cli import app as cli_app
+    disp = MagicMock()
+    disp.status_summary.return_value = {"active": 1, "waiting": 1, "paused": 0,
+                                        "complete": 2, "error": 0, "total": 4}
+    disp.format_status.return_value = "전체 4 | ↓ 1 | 대기 1 | 일시 0 | 완료 2 | 오류 0"
+    disp.active_downloads.return_value = [
+        {"name": "서안.rar", "total_mb": 2000.0, "done_mb": 1000.0, "speed_mb": 1.5}]
+    with patch("vesper_x.cli.Aria2Dispatcher", return_value=disp):
+        result = runner.invoke(cli_app, ["status"])
+    assert result.exit_code == 0
+    assert "전체 4" in result.output
+    assert "50.0%" in result.output
+    assert "서안.rar" in result.output

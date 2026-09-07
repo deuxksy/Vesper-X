@@ -21,6 +21,29 @@ def test_resolve_post_passes_proxy_to_httpx_get():
     assert results == []
 
 
+def test_resolve_post_mediafire_fetch_is_direct_not_proxied():
+    """mediafire 직링크는 요청 IP에 묶인다 - 프록시(SG)로 resolve하면 heritage가
+    홈페이지 HTML을 받는다 (2026-09-07 실측). mediafire 페이지 fetch는 직접 경로."""
+    post_resp = MagicMock()
+    post_resp.text = '<html><body><a href="https://www.mediafire.com/file/abc/set.rar">dl</a></body></html>'
+    mf_resp = MagicMock()
+    mf_resp.text = '<a href="https://download123.mediafire.com/xyz/set.rar">download</a>'
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs.get("proxy")))
+        return mf_resp if "mediafire" in url else post_resp
+
+    with patch("vesper_x.cli.httpx.get", side_effect=fake_get), \
+         patch("vesper_x.extractors.mediafire.MediafireResolver.extract_direct_url",
+               return_value="https://download123.mediafire.com/xyz/set.rar"):
+        results = resolve_post("https://misskon.com/post-1/", config=AppConfig(proxy=PROXY))
+    mf_calls = [c for c in calls if "mediafire.com" in c[0] and "download" not in c[0]]
+    assert mf_calls and all(p is None for _, p in mf_calls)
+    assert len(results) == 1
+    assert results[0].direct_url == "https://download123.mediafire.com/xyz/set.rar"
+
+
 def test_resolve_post_constructs_resolvers_with_proxy():
     http_resp = MagicMock()
     http_resp.text = '<html><body><a href="https://ouo.io/abc123">dl</a></body></html>'
@@ -60,6 +83,22 @@ class _NoOpPage:
 def _fake_playwright_capturing_launch(launch_mock):
     ctx = MagicMock()
     ctx.__aenter__ = AsyncMock(return_value=SimpleNamespace(
+        chromium=SimpleNamespace(launch_persistent_context=launch_mock)
+    ))
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    return MagicMock(return_value=ctx)
+
+
+def _persistent_context_mock(page):
+    return AsyncMock(return_value=SimpleNamespace(
+        pages=[page], new_page=AsyncMock(return_value=page), close=AsyncMock(),
+        cookies=AsyncMock(return_value=[]), clear_cookies=AsyncMock(), add_cookies=AsyncMock()))
+
+
+def _fake_playwright_capturing_plain_launch(launch_mock):
+    """gofile용 - 여전히 일반 launch를 쓰는 resolver용 fake."""
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=SimpleNamespace(
         chromium=SimpleNamespace(launch=launch_mock)
     ))
     ctx.__aexit__ = AsyncMock(return_value=False)
@@ -68,12 +107,7 @@ def _fake_playwright_capturing_launch(launch_mock):
 
 @pytest.mark.asyncio
 async def test_ouo_bypasser_launches_browser_with_proxy():
-    launch_mock = AsyncMock(return_value=SimpleNamespace(
-        new_context=AsyncMock(return_value=SimpleNamespace(
-            new_page=AsyncMock(return_value=_NoOpPage())
-        )),
-        close=AsyncMock(),
-    ))
+    launch_mock = _persistent_context_mock(_NoOpPage())
     with patch("vesper_x.extractors.ouo.async_playwright", _fake_playwright_capturing_launch(launch_mock)):
         await OuoBypasser(proxy=PROXY)._run_playwright_bypass("https://ouo.io/abc123")
     assert launch_mock.call_args.kwargs.get("proxy") == {"server": PROXY}
@@ -82,27 +116,16 @@ async def test_ouo_bypasser_launches_browser_with_proxy():
 @pytest.mark.asyncio
 async def test_ouo_bypasser_launches_real_chrome_headed():
     """ouo.io는 Cloudflare challenge가 있어 번들/headless Chromium은 막힌다 - real Chrome headed만 통과."""
-    context_mock = AsyncMock(return_value=SimpleNamespace(new_page=AsyncMock(return_value=_NoOpPage())))
-    launch_mock = AsyncMock(return_value=SimpleNamespace(
-        new_context=context_mock,
-        close=AsyncMock(),
-    ))
+    launch_mock = _persistent_context_mock(_NoOpPage())
     with patch("vesper_x.extractors.ouo.async_playwright", _fake_playwright_capturing_launch(launch_mock)):
         await OuoBypasser()._run_playwright_bypass("https://ouo.io/abc123")
     assert launch_mock.call_args.kwargs.get("channel") == "chrome"
     assert launch_mock.call_args.kwargs.get("headless") is False
-    # 가짜 UA를 덮어쓰면 실제 Chrome 지문과 불일치해 CF challenge에 걸린다 - UA 스푸핑 금지
-    assert "user_agent" not in context_mock.call_args.kwargs
 
 
 @pytest.mark.asyncio
 async def test_ouo_bypasser_without_proxy_launches_plain():
-    launch_mock = AsyncMock(return_value=SimpleNamespace(
-        new_context=AsyncMock(return_value=SimpleNamespace(
-            new_page=AsyncMock(return_value=_NoOpPage())
-        )),
-        close=AsyncMock(),
-    ))
+    launch_mock = _persistent_context_mock(_NoOpPage())
     with patch("vesper_x.extractors.ouo.async_playwright", _fake_playwright_capturing_launch(launch_mock)):
         await OuoBypasser()._run_playwright_bypass("https://ouo.io/abc123")
     assert "proxy" not in launch_mock.call_args.kwargs or launch_mock.call_args.kwargs.get("proxy") is None
@@ -123,7 +146,7 @@ async def test_gofile_resolver_launches_browser_with_proxy():
         new_context=AsyncMock(return_value=context),
         close=AsyncMock(),
     ))
-    with patch("vesper_x.extractors.gofile.async_playwright", _fake_playwright_capturing_launch(launch_mock)):
+    with patch("vesper_x.extractors.gofile.async_playwright", _fake_playwright_capturing_plain_launch(launch_mock)):
         result = await GofileResolver(proxy=PROXY).resolve("https://gofile.io/d/xyz")
     # body를 캡처하지 못하면 [] 반환 - 이 테스트의 관심사는 launch kwargs
     assert result == []

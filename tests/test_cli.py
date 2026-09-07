@@ -103,15 +103,64 @@ def test_crawl_dispatches_each_post_immediately():
     # resolve_post가 mock이라 fetch는 tag pagination 페이지에만 호출된다
     fetcher.fetch.side_effect = [page1, page2]
 
+    registry_stub = MagicMock()
+    registry_stub.is_dispatched.return_value = False
     with patch("vesper_x.cli.BrowserFetcher") as bf_cls, \
          patch("vesper_x.cli.load_config", return_value=AppConfig(proxy=None)), \
          patch("vesper_x.cli.resolve_post", return_value=[meta]) as mock_resolve, \
+         patch("vesper_x.cli.ModelRegistry", return_value=registry_stub), \
          patch("vesper_x.cli.Aria2Dispatcher") as disp_cls:
         bf_cls.return_value.__enter__.return_value = fetcher
         disp_cls.return_value.dispatch.return_value = "gid123"
+        disp_cls.return_value.waiting_count.return_value = 0
         result = runner.invoke(app, ["crawl", "https://misskon.com/tag/t/", "--pages", "0"])
         assert result.exit_code == 0
 
     # post 2건 각각 dispatch (페이지 페치 직후)
     assert mock_resolve.call_count == 2
     assert disp_cls.return_value.dispatch.call_count == 2
+
+
+def test_resolve_post_follows_post_pagination_pages():
+    """misskon 멀티페이지 포스트는 뒷 페이지의 다운로드 링크까지 본다."""
+    page1 = '<html><body><div class="page-link"><a href="https://misskon.com/post-a/2/" class="post-page-numbers">2</a></div></body></html>'
+    page2 = '<html><body><a href="https://ouo.io/abc999" rel="nofollow">dl</a></body></html>'
+    fetcher = MagicMock()
+    fetcher.fetch.side_effect = [page1, page2]
+    with patch("vesper_x.extractors.ouo.OuoBypasser.resolve", return_value="https://www.mediafire.com/file/x/s.rar"), \
+         patch("vesper_x.extractors.mediafire.MediafireResolver.extract_direct_url", return_value="https://download2299.mediafire.com/x/s.rar"), \
+         patch("vesper_x.cli.httpx.get") as mock_httpx:
+        mf_resp = MagicMock()
+        mf_resp.text = "<html></html>"
+        mock_httpx.return_value = mf_resp
+        results = resolve_post("https://misskon.com/post-a/", fetcher=fetcher)
+    assert fetcher.fetch.call_count == 2
+    assert fetcher.fetch.call_args_list[0].args[0] == "https://misskon.com/post-a/"
+    assert fetcher.fetch.call_args_list[1].args[0] == "https://misskon.com/post-a/2/"
+    assert len(results) == 1
+
+
+def test_crawl_waits_when_aria2_queue_is_full():
+    """aria2 waiting 큐가 있으면(대역 포화) 소화될 때까지 대기한다."""
+    from vesper_x.config import AppConfig
+    from vesper_x.models import DownloadMetadata
+
+    page1 = '<h2 class="post-box-title"><a href="https://misskon.com/p1/">P1</a></h2>'
+    fetcher = MagicMock()
+    fetcher.fetch.return_value = page1
+    meta = DownloadMetadata(direct_url="https://dl/x.rar", referer="https://misskon.com/p1/",
+                            user_agent="ua", filename="x.rar", source_page="https://misskon.com/p1/")
+    registry_stub = MagicMock()
+    registry_stub.is_dispatched.return_value = False
+    with patch("vesper_x.cli.BrowserFetcher") as bf_cls, \
+         patch("vesper_x.cli.load_config", return_value=AppConfig()), \
+         patch("vesper_x.cli.resolve_post", return_value=[meta]), \
+         patch("vesper_x.cli.ModelRegistry", return_value=registry_stub), \
+         patch("vesper_x.cli.Aria2Dispatcher") as disp_cls, \
+         patch("vesper_x.cli.time.sleep") as mock_sleep:
+        bf_cls.return_value.__enter__.return_value = fetcher
+        disp_cls.return_value.waiting_count.side_effect = [2, 2, 0, 0]  # resolve 전 두 번 적체, 통과 + dispatch 직전 통과
+        disp_cls.return_value.dispatch.return_value = "gid1"
+        result = runner.invoke(app, ["crawl", "https://misskon.com/tag/t/"])
+        assert result.exit_code == 0
+    assert mock_sleep.call_count >= 2

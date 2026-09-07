@@ -107,15 +107,34 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
         config = load_config()
 
     headers = {"User-Agent": DEFAULT_USER_AGENT}
-    try:
+
+    def _fetch(url: str) -> str:
         if fetcher is not None:
-            html_content = fetcher.fetch(post_url)
-        else:
-            resp = httpx.get(post_url, headers=headers, follow_redirects=True, timeout=30.0, proxy=config.proxy)
-            html_content = resp.text
+            return fetcher.fetch(url)
+        resp = httpx.get(url, headers=headers, follow_redirects=True, timeout=30.0, proxy=config.proxy)
+        return resp.text
+
+    try:
+        html_content = _fetch(post_url)
     except Exception as e:
         console.print(f"[bold red]Failed to fetch post URL {post_url}: {e}[/bold red]")
         return []
+
+    # misskon 멀티페이지 포스트: 다운로드 링크가 뒷 페이지(/N/)에 있기도 하다 -
+    # 전 페이지를 병합해 파싱한다 (baegjm06 실측: 링크가 2페이지 이후에만 존재)
+    if "misskon.com" in post_url:
+        page_soup = BeautifulSoup(html_content, "html.parser")
+        base = post_url.rstrip("/") + "/"
+        page_urls = {post_url}
+        for a in page_soup.find_all("a", class_="post-page-numbers", href=True):
+            href = a["href"].strip()
+            if href.startswith(base) and href not in page_urls:
+                page_urls.add(href)
+        for p_url in sorted(page_urls - {post_url})[:40]:
+            try:
+                html_content += _fetch(p_url)
+            except Exception:
+                pass
 
     if "cosplaytele.com" in post_url:
         parser = CosplayteleParser()
@@ -190,7 +209,9 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
         direct_url = current_url
         if "mediafire.com" in current_url:
             try:
-                mf_resp = httpx.get(current_url, headers=headers, follow_redirects=True, timeout=30.0, proxy=config.proxy)
+                # mediafire 직링크는 요청 IP에 묶인다 - 프록시(SG)로 resolve하면
+                # heritage가 홈페이지 HTML을 받는다(2026-09-07 실측). 직접 경로 필수.
+                mf_resp = httpx.get(current_url, headers=headers, follow_redirects=True, timeout=30.0, proxy=None)
                 extracted_direct = mediafire_resolver.extract_direct_url(mf_resp.text)
                 if extracted_direct:
                     direct_url = extracted_direct
@@ -400,7 +421,8 @@ def models(
     ct_live = _live_cosplaytele_count(info, proxy=config.proxy)
     heritage_live = _live_heritage_counts(info)
 
-    console.print(f"[bold]{info['canonical']}[/bold]  (slug: {info['slug']})")
+    grade = info.get("grade") or "-"
+    console.print(f"[bold]{info['canonical']}[/bold]  [grade {grade}]  (slug: {info['slug']})")
     snap = info["snapshot"]
     mk_str = f"{mk_live}편 (실시간)" if mk_live is not None else "조회 실패"
     ct_str = f"{ct_live}편 (실시간)" if ct_live is not None else "조회 실패"
@@ -420,6 +442,21 @@ def models(
     else:
         entry = f"https://cosplaytele.com/?s={urllib.parse.quote(info['canonical'])}"
         console.print(f"  [green]→ 추천: cosplaytele ({ct_n}편)[/green]  진입: {entry}")
+
+
+@app.command()
+def status():
+    """aria2 상태 조회: 전체/진행/대기/완료/오류 + 진행 중 상세."""
+    dispatcher = Aria2Dispatcher(load_config())
+    summary = dispatcher.status_summary()
+    console.print(f"[bold][aria2] {dispatcher.format_status(summary)}[/bold]")
+    actives = dispatcher.active_downloads()
+    if actives:
+        console.print("\n[bold]진행 중:[/bold]")
+        for d in actives:
+            pct = d["done_mb"] * 100 / d["total_mb"] if d["total_mb"] else 0
+            console.print(f"  {pct:5.1f}%  {d['done_mb']:8.1f}/{d['total_mb']:.0f}MB  "
+                          f"{d['speed_mb']:5.1f}MB/s  {d['name'][:60]}")
 
 
 @app.command()
@@ -457,6 +494,7 @@ def crawl(
 
     visited_pages = set()
     visited_posts: set[str] = set()
+    registry = ModelRegistry()
     to_visit = [url]
     all_metadata: list[DownloadMetadata] = []
 
@@ -483,16 +521,32 @@ def crawl(
                     continue
                 visited_posts.add(post_url)
                 post_count += 1
+                if registry.is_dispatched(post_url):
+                    console.print(f"[dim]({post_count}) SKIP (이미 전송됨): {post_url}[/dim]")
+                    continue
                 console.print(f"[bold cyan]({post_count})[/bold cyan] {post_url}")
+
+                # 대역 게이트: aria2 waiting 큐가 비어 있을 때만 진행한다.
+                # active는 정상 동시성이지만 waiting 적체는 대역 포화를 뜻한다
+                # (heritage 링크는 Meridian-X transmission과 공유).
+                while dispatcher and int(dispatcher.waiting_count()) > 0:
+                    console.print(f"[dim]aria2 대기 있음 [{dispatcher.format_status(dispatcher.status_summary())}] - 30초 대기...[/dim]")
+                    time.sleep(30)
 
                 metadata = resolve_post(post_url, config=config, current_tag=tag_slug, fetcher=fetcher)
                 all_metadata.extend(metadata)
 
                 if dispatcher:
                     for m in metadata:
+                        # dispatch 직전 재확인 - resolve(ouo bypass 수 분) 사이 waiting이 찰 수 있다
+                        while int(dispatcher.waiting_count()) > 0:
+                            console.print(f"[dim]aria2 대기 있음 [{dispatcher.format_status(dispatcher.status_summary())}] - 30초 대기...[/dim]")
+                            time.sleep(30)
                         try:
                             gid = dispatcher.dispatch(m)
                             console.print(f"[bold green]Dispatched to aria2[/bold green] (GID: [cyan]{gid}[/cyan]) - {m.filename or m.direct_url[:60]}")
+                            console.print(f"[dim]  [aria2] {dispatcher.format_status(dispatcher.status_summary())}[/dim]")
+                            registry.record_dispatch(post_url, note=m.filename)
                         except Exception as e:
                             console.print(f"[bold red]Failed to dispatch to aria2: {e}[/bold red]")
 
