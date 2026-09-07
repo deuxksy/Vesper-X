@@ -206,6 +206,32 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
                 )
             continue
 
+        # mediafire 폴더 링크는 개별 파일 여러 개로 확장된다
+        if "mediafire.com" in current_url and "/folder/" in current_url:
+            folder_files = mediafire_resolver.resolve_folder(current_url)
+            for f_url in folder_files:
+                try:
+                    mf_resp = httpx.get(f_url, headers=headers, follow_redirects=True, timeout=30.0, proxy=None)
+                    extracted_direct = mediafire_resolver.extract_direct_url(mf_resp.text)
+                    if extracted_direct:
+                        fname = extracted_direct.split("/")[-1].split("?")[0]
+                        fname = urllib.parse.unquote(fname).replace("+", " ") if fname else None
+                        results.append(
+                            DownloadMetadata(
+                                direct_url=extracted_direct,
+                                referer=post_url,
+                                user_agent=DEFAULT_USER_AGENT,
+                                filename=fname,
+                                source_page=post_url,
+                                tags=list(tags),
+                                models=list(matched_models),
+                                file_page_url=f_url,
+                            )
+                        )
+                except Exception as e:
+                    console.print(f"[yellow]Warning fetching Mediafire folder item {f_url}: {e}[/yellow]")
+            continue
+
         direct_url = current_url
         if "mediafire.com" in current_url:
             try:
@@ -324,10 +350,18 @@ def handle_results(
         if config is None:
             config = load_config()
         dispatcher = Aria2Dispatcher(config)
+        registry = ModelRegistry()
         for m in metadata_list:
             try:
                 gid = dispatcher.dispatch(m)
                 console.print(f"[bold green]Dispatched to aria2[/bold green] (GID: [cyan]{gid}[/cyan]) - {m.direct_url}")
+                if m.source_page:
+                    registry.record_dispatch(
+                        m.source_page,
+                        note=m.filename,
+                        direct_url=m.file_page_url or m.direct_url,
+                        model_name=m.models[0] if m.models else None,
+                    )
             except Exception as e:
                 console.print(f"[bold red]Failed to dispatch to aria2: {e}[/bold red]")
 

@@ -46,3 +46,25 @@ def test_extract_mediafire_direct_url_not_found():
     resolver = MediafireResolver()
     direct_url = resolver.extract_direct_url(sample_html)
     assert direct_url is None
+ 
+ 
+def test_resolve_mediafire_folder():
+    from unittest.mock import patch
+    resolver = MediafireResolver()
+    mock_resp = {
+        "response": {
+            "folder_content": {
+                "files": [
+                    {"quickkey": "k1", "filename": "part1.rar"},
+                    {"quickkey": "k2", "filename": "part2.rar"},
+                ]
+            }
+        }
+    }
+    with patch("vesper_x.extractors.mediafire.httpx.get") as mock_get:
+        mock_get.return_value.json.return_value = mock_resp
+        files = resolver.resolve_folder("https://www.mediafire.com/folder/c7uo499i7wf1r")
+        assert files == [
+            "https://www.mediafire.com/file/k1",
+            "https://www.mediafire.com/file/k2",
+        ]

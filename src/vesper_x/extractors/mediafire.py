@@ -1,4 +1,6 @@
+import re
 from bs4 import BeautifulSoup
+import httpx
 
 
 class MediafireResolver:
@@ -27,3 +29,18 @@ class MediafireResolver:
                 return href
 
         return None
+
+    def resolve_folder(self, folder_url: str) -> list[str]:
+        """Mediafire 폴더 URL에서 포함된 개별 파일 URL 목록을 추출한다."""
+        match = re.search(r"/folder/([a-zA-Z0-9]+)", folder_url)
+        if not match:
+            return []
+        folder_key = match.group(1)
+        api_url = f"https://www.mediafire.com/api/1.4/folder/get_content.php?folder_key={folder_key}&content_type=files&response_format=json"
+        try:
+            resp = httpx.get(api_url, timeout=20.0)
+            data = resp.json()
+            files = data.get("response", {}).get("folder_content", {}).get("files", [])
+            return [f"https://www.mediafire.com/file/{f['quickkey']}" for f in files if "quickkey" in f]
+        except Exception:
+            return []
