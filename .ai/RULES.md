@@ -9,6 +9,8 @@
 | 의존성 설치 | `uv sync` |
 | Test | `uv run pytest` |
 | CLI 실행 | `uv run vesper parse "<url>" --extract-only` |
+| 모델 조회 | `uv run vesper models <이름/slug>` — 사이트 실시간 카운트 + heritage 보유 + 크롤 추천 |
+| models.db 재생성 | `uv run python scripts/build_models_db.py` — data/*.tsv에서 (패키지 import 때문에 uv run 필수) |
 | Browser 설치 | `uv run playwright install chromium` — ouo 실우회 시 1회 |
 
 Lint 도구는 미설정. 도입 시 이 표를 갱신한다.

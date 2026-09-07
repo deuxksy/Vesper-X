@@ -8,6 +8,8 @@ import re
 import sqlite3
 from pathlib import Path
 
+from vesper_x.models_db import tokens, flat
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 NOISE = {'ai art', 'unknown cosplayer', 'xiuren秀人网', 'pure media', 'fantasy factory',
@@ -20,15 +22,6 @@ MANUAL_MATCHES = {
     "白银81": ("白銀81 (81silver811)",),
     "日奈娇": ("Rinaijiao", "Rinaijiao-(日奈娇)"),
 }
-
-
-def tokens(s):
-    return (set(re.findall(r'[a-z0-9_.]{3,}', s.lower())),
-            set(re.findall(r'[一-鿿぀-ヿ가-힯]{2,}', s)))
-
-
-def flat(s):
-    return re.sub(r'[^a-z0-9一-鿿぀-ヿ가-힯]', '', s.lower())
 
 
 def load():
@@ -53,7 +46,7 @@ DROP TABLE IF EXISTS model_names;
 DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS sites;
 CREATE TABLE sites (id INTEGER PRIMARY KEY, domain TEXT UNIQUE, census_date TEXT, note TEXT);
-CREATE TABLE models (id INTEGER PRIMARY KEY, canonical_name TEXT UNIQUE, is_aggregator INTEGER DEFAULT 0);
+CREATE TABLE models (id INTEGER PRIMARY KEY, canonical_name TEXT UNIQUE, slug TEXT UNIQUE, is_aggregator INTEGER DEFAULT 0);
 CREATE TABLE model_names (
     site_id INT, model_id INT, variant TEXT, post_count INT, slug_url TEXT,
     PRIMARY KEY (site_id, variant),
@@ -83,12 +76,25 @@ GROUP BY m.id;
     db.execute("INSERT INTO sites VALUES (2, 'cosplaytele.com', ?, 'WP REST API 전수 열거')",
                (_tsv_date('cosplaytele_census_full.tsv'),))
 
+    def derive_slug(name):
+        """표시명에서 roman slug 도출: 등장순 roman 토큰 하이픈 연결, 없으면 flat 전체."""
+        romans = re.findall(r'[a-z0-9_.]{3,}', name.lower())
+        if romans:
+            return re.sub(r'[^a-z0-9]+', '-', ' '.join(romans)).strip('-')
+        return flat(name)
+
     def model_id(name, is_agg=0):
         row = db.execute("SELECT id FROM models WHERE canonical_name=?", (name,)).fetchone()
         if row:
             return row[0]
-        return db.execute("INSERT INTO models (canonical_name, is_aggregator) VALUES (?,?)",
-                          (name, is_agg)).lastrowid
+        slug = derive_slug(name)
+        # slug 충돌 시 접미사
+        n = 2
+        while db.execute("SELECT 1 FROM models WHERE slug=?", (slug,)).fetchone():
+            slug = f"{derive_slug(name)}-{n}"
+            n += 1
+        return db.execute("INSERT INTO models (canonical_name, slug, is_aggregator) VALUES (?,?,?)",
+                          (name, slug, is_agg)).lastrowid
 
     for name, cnt, slug in mk_rows:
         is_agg = 1 if name.lower() in NOISE else 0
@@ -138,6 +144,18 @@ GROUP BY m.id;
                 target_mid = model_id(folder)
             db.execute("INSERT OR REPLACE INTO archive_artists VALUES (?,?,?,?,?)",
                        (target_mid, region, folder, int(albums), int(kb)))
+
+    # 5. CJK slug 보강: 캐노니컬에 roman이 없어도 변형에 있으면 roman slug로 승격
+    for mid, slug in db.execute("SELECT id, slug FROM models").fetchall():
+        if re.search(r"[a-z0-9]", slug):
+            continue
+        for (variant,) in db.execute(
+                "SELECT variant FROM model_names WHERE model_id = ?", (mid,)):
+            cand = derive_slug(variant)
+            if re.search(r"[a-z0-9]", cand) and not db.execute(
+                    "SELECT 1 FROM models WHERE slug = ? AND id != ?", (cand, mid)).fetchone():
+                db.execute("UPDATE models SET slug = ? WHERE id = ?", (cand, mid))
+                break
 
     db.commit()
     n = db.execute("SELECT COUNT(*) FROM model_names").fetchone()[0]

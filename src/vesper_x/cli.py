@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import subprocess
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -22,6 +23,7 @@ from vesper_x.extractors.misskon import MisskonParser
 from vesper_x.extractors.ouo import OuoBypasser
 from vesper_x.fetchers import BrowserFetcher
 from vesper_x.models import DownloadMetadata
+from vesper_x.models_db import ModelRegistry
 
 try:
     import pyperclip
@@ -58,19 +60,25 @@ def extract_tags_from_html_and_url(html_content: str, post_url: str) -> list[str
     return tags
 
 
-def extract_models_from_tags_and_html(tags: list[str], html_content: str, post_url: str, config_models: list[str]) -> list[str]:
-    """Smart auto-extract model names from tags, config, and title."""
+def extract_models_from_tags_and_html(tags: list[str], html_content: str, post_url: str, config_models: list[str], canonicalize=None) -> list[str]:
+    """Smart auto-extract model names from tags, config, and title.
+
+    canonicalize를 넘기면 사이트 표기 변형을 캐노니컬명(models.db)으로 통일해 기록한다.
+    """
     models = []
     for m in config_models:
         if m in post_url or m in html_content:
-            if m not in models:
-                models.append(m)
+            name = canonicalize(m) or m if canonicalize else m
+            if name not in models:
+                models.append(name)
 
     for tag in tags:
         lower_t = tag.lower().strip()
         is_genre = any(kw in lower_t for kw in GENRE_TAG_KEYWORDS)
-        if not is_genre and tag not in models:
-            models.append(tag)
+        if not is_genre:
+            name = canonicalize(tag) or tag if canonicalize else tag
+            if name not in models:
+                models.append(name)
 
     return models
 
@@ -123,7 +131,8 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
     if current_tag and current_tag not in tags:
         tags.append(current_tag)
 
-    matched_models = extract_models_from_tags_and_html(tags, html_content, post_url, config.models)
+    matched_models = extract_models_from_tags_and_html(
+        tags, html_content, post_url, config.models, canonicalize=ModelRegistry().canonicalize)
 
     results: list[DownloadMetadata] = []
     # ouo는 한국 미차단 + Cloudflare challenge에 데이터센터 IP가 불리해 직접 경로,
@@ -299,6 +308,118 @@ def handle_results(
                 console.print(f"[bold green]Dispatched to aria2[/bold green] (GID: [cyan]{gid}[/cyan]) - {m.direct_url}")
             except Exception as e:
                 console.print(f"[bold red]Failed to dispatch to aria2: {e}[/bold red]")
+
+
+def _live_misskon_count(info: dict, proxy: Optional[str] = None) -> Optional[int]:
+    """misskon 태그 리스팅을 순차 페치해 실시간 포스트 수를 센다 (페이지당 20)."""
+    slug_url = info.get("misskon_slug") or f"https://misskon.com/tag/{info['slug']}/"
+    headers = {"User-Agent": DEFAULT_USER_AGENT}
+    total = 0
+    url = slug_url
+    for _page in range(60):
+        try:
+            resp = httpx.get(url, headers=headers, follow_redirects=True, timeout=20.0, proxy=proxy)
+        except httpx.HTTPError:
+            return None
+        if resp.status_code != 200:
+            break
+        n = resp.text.count("post-box-title")
+        if n == 0:
+            break
+        total += n
+        if n < 20:
+            break
+        url = f"{slug_url.rstrip('/')}/page/{_page + 2}/"
+    return total
+
+
+def _live_cosplaytele_count(info: dict, proxy: Optional[str] = None) -> Optional[int]:
+    """cosplaytele WP REST 검색에서 제목에 모델명이 든 포스트 수를 센다."""
+    names = [info["canonical"].lower(), info["slug"].lower()]
+    headers = {"User-Agent": DEFAULT_USER_AGENT}
+    query = urllib.parse.quote(info["canonical"])
+    total = 0
+    for page in range(1, 16):
+        try:
+            resp = httpx.get(
+                f"https://cosplaytele.com/wp-json/wp/v2/posts?per_page=100&page={page}&search={query}",
+                headers=headers, timeout=20.0, proxy=proxy)
+        except httpx.HTTPError:
+            return None
+        if resp.status_code != 200:
+            break
+        try:
+            posts = resp.json()
+        except ValueError:
+            break
+        if not isinstance(posts, list) or not posts:
+            break
+        for p in posts:
+            title = (p.get("title") or {}).get("rendered", "").lower()
+            if any(n in title for n in names if n):
+                total += 1
+        if len(posts) < 100:
+            break
+    return total
+
+
+def _live_heritage_counts(info: dict) -> dict:
+    """heritage 아카이브의 실시간 앨범 수/용량 (SSH)."""
+    total_albums, total_kb = 0, 0
+    for folder in info["archive"]["folders"]:
+        try:
+            import shlex
+            r = subprocess.run(
+                ["ssh", "-o", "ConnectTimeout=10", "media@heritage",
+                 f"p=$(find /mnt/data2/torrent/downloads/aria -maxdepth 2 -type d -name {shlex.quote(folder)} | head -1); "
+                 f"[ -n \"$p\" ] && find \"$p\" -mindepth 1 -maxdepth 1 -type d | wc -l && du -sk \"$p\" | cut -f1"],
+                capture_output=True, text=True, timeout=30)
+            out = r.stdout.split()
+            if len(out) >= 2:
+                total_albums += int(out[0])
+                total_kb += int(out[1])
+        except (subprocess.SubprocessError, ValueError):
+            continue
+    return {"albums": total_albums, "size_kb": total_kb}
+
+
+@app.command()
+def models(
+    query: str = typer.Argument(..., help="모델 이름/slug (예: zinieq, Byoru)"),
+):
+    """모델 조회: 사이트별 실시간 보유수 + heritage 보유 + 크롤 사이트 추천."""
+    registry = ModelRegistry()
+    info = registry.lookup(query)
+    if info is None:
+        console.print(f"[yellow]'{query}' 을(를) models.db에서 찾을 수 없습니다. "
+                      f"(data/models.db 필요 - scripts/build_models_db.py)[/yellow]")
+        raise typer.Exit(1)
+
+    config = load_config()
+    mk_live = _live_misskon_count(info, proxy=config.proxy)
+    ct_live = _live_cosplaytele_count(info, proxy=config.proxy)
+    heritage_live = _live_heritage_counts(info)
+
+    console.print(f"[bold]{info['canonical']}[/bold]  (slug: {info['slug']})")
+    snap = info["snapshot"]
+    mk_str = f"{mk_live}편 (실시간)" if mk_live is not None else "조회 실패"
+    ct_str = f"{ct_live}편 (실시간)" if ct_live is not None else "조회 실패"
+    console.print(f"  misskon       [cyan]{mk_str}[/cyan]  (스냅샷 {snap['misskon']})")
+    console.print(f"  cosplaytele   [cyan]{ct_str}[/cyan]  (스냅샷 {snap['cosplaytele']})")
+    gb = heritage_live["size_kb"] / 1024 / 1024
+    console.print(f"  heritage      [magenta]{heritage_live['albums']}앨범 / {gb:.1f}GB[/magenta]  [{info['archive']['region'] or '-'}]")
+
+    # 추천: 실시간 수가 많은 쪽 (실패 시 스냅샷으로)
+    mk_n = mk_live if mk_live is not None else snap["misskon"]
+    ct_n = ct_live if ct_live is not None else snap["cosplaytele"]
+    if mk_n == 0 and ct_n == 0:
+        console.print("  [yellow]두 사이트 모두 보유 없음[/yellow]")
+    elif mk_n >= ct_n:
+        entry = info.get("misskon_slug") or f"https://misskon.com/tag/{info['slug']}/"
+        console.print(f"  [green]→ 추천: misskon ({mk_n}편)[/green]  진입: {entry}")
+    else:
+        entry = f"https://cosplaytele.com/?s={urllib.parse.quote(info['canonical'])}"
+        console.print(f"  [green]→ 추천: cosplaytele ({ct_n}편)[/green]  진입: {entry}")
 
 
 @app.command()
