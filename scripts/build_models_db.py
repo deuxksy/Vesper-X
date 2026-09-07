@@ -6,6 +6,7 @@
 """
 import re
 import sqlite3
+import tomllib
 from pathlib import Path
 
 from vesper_x.models_db import tokens, flat
@@ -16,32 +17,15 @@ NOISE = {'ai art', 'unknown cosplayer', 'xiuren秀人网', 'pure media', 'fantas
          'djawa photo', 'photochips', 'artgravia', 'sweetbox', 'leehee express',
          'moon night snap', 'bimilstory', 'atfm', 'heroine k'}
 
-# 강기준(한자 완전일치/전체포함) 감사로 확정한 병합 쌍: (유지 canonical, 흡수 canonical)
-MANUAL_MERGES = [
-    ("yuuhui玉汇", "Kokuhui"),
-    ("铃木美咲", "Misaki Sai"),
-    ("咬一口兔娘ovo (Yaokoututu)", "咬一口兔娘ovo"),
-    ("黏黏团子兔", "咬一口兔娘ovo (Yaokoututu)"),  # 동일인 - 2026-09-07 사용자 확정
-    ("前羽_rr", "前羽rr"),
-    ("Neko薇薇", "Neko-薇薇"),
-    ("Zia (지아)", "Jia (지아)"),
-    ("桃良阿宅 (taoliangazhai)", "Tao Liang"),
-    ("Qianchuan Yixiao (笑芳香沁)", "Fragrant Qin (笑芳香沁)"),
-    ("Jeong Jenny (정제니)", "Jenny"),
-    ("Jena (제나)", "제나 (June)"),
-    ("Vina Silbee", "VINA"),
-    ("抖娘-利世", "Li Shi"),
-    ("抱走莫子aa", "Mozi"),
-    ("Carol周妍希", "Zhou Yan Xi (周妍希)"),
-    ("Chiu_mini (mini肉包)", "肉包 (Rou bao)"),
-]
+# 큐레이션 데이터는 data/curation.toml에서 관리한다 (Meridian-X settings 패턴) -
+# 코드 수정 없이 파일 갱신만으로 병합/매칭 규칙이 반영된다
+with open(DATA_DIR / "curation.toml", "rb") as _f:
+    _curation = tomllib.load(_f)
 
-# 간체/번체, roman-only/CJK-only 등 토큰 매칭이 못 묶는 알려진 쌍:
-# (misskon 캐노니컬, cosplaytele 변형들)
-MANUAL_MATCHES = {
-    "白银81": ("白銀81 (81silver811)",),
-    "日奈娇": ("Rinaijiao", "Rinaijiao-(日奈娇)"),
-}
+# 토큰 매칭이 못 묶는 변형 쌍: misskon 캐노니컬 -> cosplaytele 변형들
+MANUAL_MATCHES = {k: tuple(v) for k, v in _curation.get("manual_matches", {}).items()}
+# 확정 동일인 병합 쌍: (유지 canonical, 흡수 canonical)
+MANUAL_MERGES = [(m["keep"], m["drop"]) for m in _curation.get("manual_merges", [])]
 
 
 def load():
@@ -62,8 +46,16 @@ def load():
     return mk_rows, ct_rows
 
 
+PREFS_BACKUP = DATA_DIR / ".model_prefs_backup.json"
+
+
 def _existing_model_prefs(db_path) -> dict:
-    """재빌드 전 기존 DB에서 수동 지정(등급/국적)을 백업한다."""
+    """재빌드 전 기존 DB에서 수동 지정(등급/국적)을 백업한다.
+
+    실패 재빌드(도중 크래시)로 DB가 비어도 파일 백업에서 복구한다 - 2026-09-07
+    model_counts 정리 중 sites 패치 NameError로 등급이 통째로 날아갔던 사고 대응.
+    """
+    import json
     prefs = {}
     if db_path.exists():
         old = sqlite3.connect(db_path)
@@ -79,6 +71,14 @@ def _existing_model_prefs(db_path) -> dict:
             except sqlite3.OperationalError:
                 pass
         old.close()
+        if prefs:
+            PREFS_BACKUP.write_text(json.dumps(
+                {k: list(v) for k, v in prefs.items()}, ensure_ascii=False))
+            return prefs
+    # DB에서 못 얻으면(크래시 직후) 파일 백업에서 복구
+    if PREFS_BACKUP.exists():
+        loaded = json.loads(PREFS_BACKUP.read_text())
+        return {k: tuple(v) for k, v in loaded.items()}
     return prefs
 
 
@@ -126,7 +126,7 @@ DROP TABLE IF EXISTS archive_artists;
 DROP TABLE IF EXISTS model_names;
 DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS sites;
-CREATE TABLE sites (id INTEGER PRIMARY KEY, domain TEXT UNIQUE, census_date TEXT, note TEXT);
+CREATE TABLE sites (id INTEGER PRIMARY KEY, domain TEXT UNIQUE, census_date TEXT, note TEXT, rar_password TEXT);
 CREATE TABLE models (id INTEGER PRIMARY KEY, canonical_name TEXT UNIQUE, slug TEXT UNIQUE, grade TEXT, region TEXT, is_aggregator INTEGER DEFAULT 0);
 CREATE TABLE model_names (
     site_id INT, model_id INT, variant TEXT, post_count INT, slug_url TEXT,
@@ -152,9 +152,9 @@ LEFT JOIN (SELECT model_id, SUM(album_count) AS albums, SUM(size_kb) AS size_kb,
            FROM archive_artists GROUP BY model_id) ar ON ar.model_id = m.id
 GROUP BY m.id;
 """)
-    db.execute("INSERT INTO sites VALUES (1, 'misskon.com', ?, '/tag/cosplay/ 전수 워크')",
+    db.execute("INSERT INTO sites VALUES (1, 'misskon.com', ?, '/tag/cosplay/ 전수 워크', 'misskon.com,mrcong.com')",
                (census_date := _tsv_date('misskon_census_full.tsv'),))
-    db.execute("INSERT INTO sites VALUES (2, 'cosplaytele.com', ?, 'WP REST API 전수 열거')",
+    db.execute("INSERT INTO sites VALUES (2, 'cosplaytele.com', ?, 'WP REST API 전수 열거', 'cosplaytele')",
                (_tsv_date('cosplaytele_census_full.tsv'),))
 
     # 수동 slug 지정 (문자 추론이 못하는 것)

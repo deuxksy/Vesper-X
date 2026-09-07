@@ -1,0 +1,74 @@
+# 모델 큐레이션 - 사용자 확정 지식
+# 규칙: 코드 수정 없이 이 파일만 갱신하면 build_models_db.py가 반영한다.
+#       (강기준 감사/사용자 확인으로 확정된 것만 추가)
+
+# 토큰 매칭이 못 묶는 변형 쌍 - misskon 캐노니컬 = [cosplaytele 변형들]
+# (간체/번체, roman-only/CJK-only 조합)
+[manual_matches]
+"白银81" = ["白銀81 (81silver811)"]
+"日奈娇" = ["Rinaijiao", "Rinaijiao-(日奈娇)"]
+
+# 확정 동일인 병합 - keep 캐노니컬로 drop 캐노니컬의 변형/보유를 흡수
+[[manual_merges]]
+keep = "yuuhui玉汇"
+drop = "Kokuhui"
+
+[[manual_merges]]
+keep = "铃木美咲"
+drop = "Misaki Sai"
+
+[[manual_merges]]
+keep = "咬一口兔娘ovo (Yaokoututu)"
+drop = "咬一口兔娘ovo"
+
+[[manual_merges]]
+keep = "黏黏团子兔"
+drop = "咬一口兔娘ovo (Yaokoututu)"  # 동일인 - 2026-09-07 사용자 확정
+
+[[manual_merges]]
+keep = "前羽_rr"
+drop = "前羽rr"
+
+[[manual_merges]]
+keep = "Neko薇薇"
+drop = "Neko-薇薇"
+
+[[manual_merges]]
+keep = "Zia (지아)"
+drop = "Jia (지아)"
+
+[[manual_merges]]
+keep = "桃良阿宅 (taoliangazhai)"
+drop = "Tao Liang"
+
+[[manual_merges]]
+keep = "Qianchuan Yixiao (笑芳香沁)"
+drop = "Fragrant Qin (笑芳香沁)"
+
+[[manual_merges]]
+keep = "Jeong Jenny (정제니)"
+drop = "Jenny"
+
+[[manual_merges]]
+keep = "Jena (제나)"
+drop = "제나 (June)"
+
+[[manual_merges]]
+keep = "Vina Silbee"
+drop = "VINA"
+
+[[manual_merges]]
+keep = "抖娘-利世"
+drop = "Li Shi"
+
+[[manual_merges]]
+keep = "抱走莫子aa"
+drop = "Mozi"
+
+[[manual_merges]]
+keep = "Carol周妍希"
+drop = "Zhou Yan Xi (周妍希)"
+
+[[manual_merges]]
+keep = "Chiu_mini (mini肉包)"
+drop = "肉包 (Rou bao)"
