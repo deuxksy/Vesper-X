@@ -183,6 +183,9 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
 
         # gofile 폴더 링크는 파일 여러 개로 확장된다 - 파일별 직링크+인증 쿠키로 dispatch
         if "gofile.io" in current_url:
+            if config.skip_gofile:
+                console.print(f"[yellow]Gofile 링크 스킵 (skip_gofile 활성): {current_url}[/yellow]")
+                continue
             try:
                 gf_downloads = run_async(gofile_resolver.resolve(current_url))
             except Exception as e:
@@ -352,6 +355,10 @@ def handle_results(
         dispatcher = Aria2Dispatcher(config)
         registry = ModelRegistry()
         for m in metadata_list:
+            if "gofile.io" in m.direct_url:
+                while dispatcher.active_gofile_count() > 0:
+                    console.print(f"[dim]gofile 진행 중 [{dispatcher.format_status(dispatcher.status_summary())}] - 1개씩 순차 처리를 위해 대기...[/dim]")
+                    time.sleep(15)
             try:
                 gid = dispatcher.dispatch(m)
                 console.print(f"[bold green]Dispatched to aria2[/bold green] (GID: [cyan]{gid}[/cyan]) - {m.direct_url}")
@@ -520,7 +527,7 @@ def run_crawl(url: str, pages: int = 1, limit: int = 0, extract_only: bool = Fal
     tag_match = re.search(r"/(?:tag|category)/([^/]+)/", url)
     tag_slug = tag_match.group(1) if tag_match else None
 
-    config = load_config()
+    config = config or load_config()
     # 사이트별 crawler는 config [sites]가 결정한다
     crawler = _select_crawler(url, config)
     dispatcher = None if extract_only else Aria2Dispatcher(config)
@@ -571,6 +578,11 @@ def run_crawl(url: str, pages: int = 1, limit: int = 0, extract_only: bool = Fal
 
                 if dispatcher:
                     for m in metadata:
+                        if "gofile.io" in m.direct_url:
+                            while dispatcher.active_gofile_count() > 0:
+                                console.print(f"[dim]gofile 진행 중 [{dispatcher.format_status(dispatcher.status_summary())}] - 1개씩 순차 처리를 위해 대기...[/dim]")
+                                time.sleep(15)
+
                         # dispatch 직전 재확인 - resolve(ouo bypass 수 분) 사이 waiting이 찰 수 있다
                         while int(dispatcher.waiting_count()) > 0:
                             console.print(f"[dim]aria2 대기 있음 [{dispatcher.format_status(dispatcher.status_summary())}] - 30초 대기...[/dim]")

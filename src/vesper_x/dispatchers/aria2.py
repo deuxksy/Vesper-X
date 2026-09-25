@@ -35,6 +35,23 @@ class Aria2Dispatcher:
         """aria2 waiting 큐 개수 - crawl 게이트는 waiting이 비어있을 때만 dispatch한다."""
         return sum(1 for d in self.client.tell_waiting(0, 100) if d.get("status") == "waiting")
 
+    def active_gofile_count(self) -> int:
+        """진행 중이거나 대기 중인 gofile 다운로드 수 - 429 방지를 위해 1개씩 순차 진행."""
+        count = 0
+        for d in self.client.tell_active():
+            for f in d.get("files", []):
+                for u in f.get("uris", []):
+                    if "gofile.io" in u.get("uri", ""):
+                        count += 1
+                        break
+        for d in self.client.tell_waiting(0, 100):
+            for f in d.get("files", []):
+                for u in f.get("uris", []):
+                    if "gofile.io" in u.get("uri", ""):
+                        count += 1
+                        break
+        return count
+
     def status_summary(self) -> dict:
         """aria2 전체 상태 집계 - crawl 진행 중 가시화용."""
         counts = {"active": 0, "waiting": 0, "paused": 0, "complete": 0, "error": 0, "total": 0}
@@ -84,6 +101,9 @@ class Aria2Dispatcher:
             options["header"].append(f"Cookie: {metadata.cookies}")
         if metadata.filename:
             options["out"] = metadata.filename
+        if "gofile.io" in metadata.direct_url:
+            options["max-connection-per-server"] = "1"
+            options["split"] = "1"
         if self.config.download_dir:
             subdir = _site_subdir(metadata.source_page, self.config.sites)
             if subdir:

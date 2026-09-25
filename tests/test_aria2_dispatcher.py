@@ -140,3 +140,39 @@ def test_active_downloads_detail():
         }]
         result = Aria2Dispatcher(AppConfig()).active_downloads()
     assert result == [{"name": "서안.rar", "total_mb": 2000.0, "done_mb": 1000.0, "speed_mb": 1.5}]
+
+
+def test_dispatch_gofile_limits_connections():
+    config = AppConfig(aria2_host="ws://localhost:6800", aria2_secret="s")
+    meta = DownloadMetadata(
+        direct_url="https://store3.gofile.io/download/web/123/part.rar",
+        referer="https://cosplaytele.com/p/1",
+        user_agent="Mozilla/5.0 Test",
+        filename="part.rar",
+        source_page="https://cosplaytele.com/p/1",
+        cookies="accountToken=tok123",
+    )
+    with patch("vesper_x.dispatchers.aria2.aria2p") as mock_aria2p:
+        mock_api = MagicMock()
+        mock_aria2p.API.return_value = mock_api
+        mock_api.add.return_value.gid = "gid12345"
+        Aria2Dispatcher(config).dispatch(meta)
+        _, kwargs = mock_api.add.call_args
+    assert kwargs["options"]["max-connection-per-server"] == "1"
+    assert kwargs["options"]["split"] == "1"
+
+
+def test_active_gofile_count():
+    with patch("vesper_x.dispatchers.aria2.aria2p") as mock_aria2p:
+        client = mock_aria2p.Client.return_value
+        client.tell_active.return_value = [
+            {"files": [{"uris": [{"uri": "https://store3.gofile.io/download/1"}]}]},
+            {"files": [{"uris": [{"uri": "https://mediafire.com/download/2"}]}]},
+        ]
+        client.tell_waiting.return_value = [
+            {"files": [{"uris": [{"uri": "https://store4.gofile.io/download/3"}]}]},
+            {"files": [{"uris": [{"uri": "https://mega.nz/4"}]}]},
+        ]
+        dispatcher = Aria2Dispatcher(AppConfig())
+        assert dispatcher.active_gofile_count() == 2
+

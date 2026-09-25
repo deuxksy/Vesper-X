@@ -48,3 +48,13 @@ def test_load_config_network_proxy_default_none(tmp_path, monkeypatch):
 
     cfg = load_config()
     assert cfg.proxy is None
+
+
+def test_load_config_skip_gofile(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[crawler]\nskip_gofile = true\n')
+    monkeypatch.setattr("vesper_x.config.DEFAULT_CONFIG_PATH", config_file)
+
+    cfg = load_config()
+    assert cfg.skip_gofile is True
+

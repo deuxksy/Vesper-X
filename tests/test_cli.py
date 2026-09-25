@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 import asyncio
 from typer.testing import CliRunner
 from vesper_x.cli import app, resolve_post, run_async
+from vesper_x.config import AppConfig
 
 runner = CliRunner()
 
@@ -66,12 +67,20 @@ def test_resolve_post_expands_gofile_folder_links():
              GofileDownload("https://store3.gofile.io/download/web/id1/a%20b.rar", "a b.rar", "accountToken=tok"),
              GofileDownload("https://store3.gofile.io/download/web/id2/c.rar", "c.rar", "accountToken=tok"),
          ])):
-        results = resolve_post("https://cosplaytele.com/cantarella-9/", fetcher=fetcher)
+        results = resolve_post("https://cosplaytele.com/cantarella-9/", fetcher=fetcher, config=AppConfig(skip_gofile=False))
 
     assert len(results) == 2
     assert results[0].filename == "a b.rar"
     assert results[0].cookies == "accountToken=tok"
     assert results[1].direct_url.endswith("c.rar")
+
+
+def test_resolve_post_skips_gofile_when_skip_gofile_enabled():
+    post_html = '<html><body><a href="https://gofile.io/d/N09Oj1mA">link</a></body></html>'
+    fetcher = MagicMock()
+    fetcher.fetch.return_value = post_html
+    results = resolve_post("https://cosplaytele.com/test/", fetcher=fetcher, config=AppConfig(skip_gofile=True))
+    assert results == []
 
 
 def test_run_async_inside_running_loop():
