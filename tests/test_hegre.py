@@ -298,3 +298,9 @@ def test_resolve_content_filename_includes_model_album():
     results = crawler.resolve_content(VIDEO_PAGE, "https://hegre.com/films/massage-x")
     assert results[0].filename == "Ani/massage-x/ani-cyprus-holiday-2160p.mp4"
 
+
+
+def test_launch_kwargs_pins_english_locale():
+    """모델명이 로케일 번역으로 오염되지 않게 영어를 고정한다 (키키 사례)."""
+    kwargs = _crawler()._launch_kwargs()
+    assert kwargs["locale"] == "en-US"

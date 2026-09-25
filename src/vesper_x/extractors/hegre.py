@@ -217,6 +217,7 @@ class HegreCrawler:
             HEGRE_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
             context = await p.chromium.launch_persistent_context(
                 str(HEGRE_PROFILE_DIR), **self._launch_kwargs())
+            await self._pin_english(context)
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
                 await page.goto(url, wait_until="domcontentloaded")
@@ -238,6 +239,7 @@ class HegreCrawler:
             HEGRE_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
             context = await p.chromium.launch_persistent_context(
                 str(HEGRE_PROFILE_DIR), **self._launch_kwargs())
+            await self._pin_english(context)
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
                 await page.goto(URLS["login"], wait_until="domcontentloaded")
@@ -251,7 +253,17 @@ class HegreCrawler:
                 await context.close()
 
     def _launch_kwargs(self) -> dict:
-        kwargs: dict = {"channel": "chrome", "headless": False}
+        # locale 고정 - 프로필 locale 쿠키가 한국어 번역을 유발해 모델명이
+        # "키키"처럼 오염되는 것을 방지한다 (2026-09-25 실측: curl 영어=Kiki)
+        kwargs: dict = {"channel": "chrome", "headless": False, "locale": "en-US"}
         if self.config.proxy:
             kwargs["proxy"] = {"server": self.config.proxy}
         return kwargs
+
+    @staticmethod
+    async def _pin_english(context) -> None:
+        """언어/국가 쿠키를 영어권으로 덮어쓴다 (locale=en, country=US)."""
+        await context.add_cookies([
+            {"name": "locale", "value": "en", "domain": ".hegre.com", "path": "/"},
+            {"name": "country", "value": "US", "domain": ".hegre.com", "path": "/"},
+        ])
