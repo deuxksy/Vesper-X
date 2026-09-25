@@ -12,23 +12,25 @@
 ## 스코프
 
 **포함:**
+
 - H(Hegre) 크롤러 구현
 - Config 2중 분리 (default.toml + 로컬 config.toml)
 - SQLite DB 스키마 및 기본 CRUD
 - aria2 dispatch 연동
 
 **제외:**
+
 - W4B(watch4beauty) — H 완성 후 동일 패턴으로 별도 구현
 - DB sync (rsync/rclone/cloud) — 별도 이슈
 - credentials 암호화 (sops) — 별도 이슈
 
 ## 사용 시나리오
 
-| CLI | 동작 |
-|---|---|
+| CLI                                            | 동작                                             |
+| ---------------------------------------------- | ------------------------------------------------ |
 | `vesper parse "https://hegre.com/films/xxx"` | 단일 갤러리/영상 다운로드 URL 추출 → aria2 전송 |
-| `vesper crawl --site hegre --model "모델명"` | 특정 모델의 전체 콘텐츠 크롤 → aria2 전송 |
-| `vesper crawl --site hegre --new` | 신작 크롤 (마지막 체크포인트 이후) → aria2 전송 |
+| `vesper crawl --site hegre --model "모델명"` | 특정 모델의 전체 콘텐츠 크롤 → aria2 전송       |
+| `vesper crawl --site hegre --new`            | 신작 크롤 (마지막 체크포인트 이후) → aria2 전송 |
 
 ## 1. Config 2중 분리
 
@@ -70,6 +72,7 @@ password = "secret"
 3. Deep merge — 로컬이 우선 (같은 키면 로컬이 덮어씀)
 
 `config.py` 변경:
+
 - `AppConfig`에 `credentials: dict[str, CredentialConfig]` 필드 추가
 - `CredentialConfig` dataclass: `username: str`, `password: str`
 - `load_config()` → `_load_default()` + `_load_local()` + `_deep_merge()` 로 분리
@@ -98,33 +101,39 @@ src/vesper_x/extractors/hegre.py
 ```
 
 두 클래스:
+
 - `HegreCrawler` — 인증 세션 관리, 페이지 목록 수집 (모델별/신작별)
 - `HegreParser` — 개별 콘텐츠 페이지에서 다운로드 URL 추출
 
 ### 3.2 다운로드 URL 추출
 
 **영상:**
+
 - 페이지 내 다운로드 섹션에서 해상도별 링크 파싱
 - 우선순위: `4K Ultra HD 2160p` > `Full HD 1080p` > 가용 최고 해상도
 - 과거 작품은 포맷이 적을 수 있으므로 최고 해상도 fallback
 
 **이미지:**
+
 - `Large Size Edition | 6000px` ZIP 링크 추출
 - ZIP 없으면 가용 최대 사이즈 fallback
 
 ### 3.3 크롤 전략
 
 **단일 (`vesper parse <URL>`):**
+
 - URL에서 콘텐츠 유형 판별 (film/gallery/photo)
 - 해당 페이지 파싱 → 다운로드 URL 추출 → `DownloadMetadata` 생성
 
 **모델 전체 (`--model`):**
+
 - 모델 프로필 페이지에서 콘텐츠 목록 수집
 - 페이지네이션 순회
 - 각 콘텐츠에 대해 파싱 + dispatch
 - DB의 다운로드 이력으로 이미 받은 건 skip
 
 **신작 (`--new`):**
+
 - 사이트 최신 업데이트 페이지에서 크롤
 - DB의 `crawl_state.last_crawl_at` 이후 콘텐츠만 수집
 - 완료 시 체크포인트 갱신
@@ -208,30 +217,29 @@ CREATE TABLE crawl_state (
 ### 5.3 DB 모듈
 
 `src/vesper_x/db.py` 신규:
+
 - `init_db()` — 테이블 생성 (IF NOT EXISTS)
 - `upsert_model()`, `upsert_gallery()`, `record_download()` 등 기본 CRUD
 - `get_crawl_checkpoint()`, `update_crawl_checkpoint()`
 - `is_downloaded(url)` — 중복 체크
 - 표준 `sqlite3` 모듈 사용 (외부 ORM 없음)
 
-### 5.4 DB sync 로드맵 (이번 스코프 밖)
+### 5.4 DB sync (이번 스코프 밖)
 
-```
-Local SQLite → rsync(Tailscale) → rclone(R2) → Cloud SQLite(Turso)
-```
-
-각 단계에서 SQLite 파일이라는 본질은 불변. sync 레이어만 교체.
+DB 동기화는 ROADMAP.md에 별도 관리. 이번에는 로컬 SQLite만 구현.
 
 ## 6. CLI 통합
 
 ### 6.1 기존 커맨드 확장
 
 `cli.py`의 `_select_crawler` registry에 `"hegre"` 추가:
+
 - `hegre.com` URL → `HegreCrawler` 자동 선택
 
 ### 6.2 새 옵션
 
 `vesper crawl` 에 추가:
+
 - `--site hegre` — 사이트 명시 선택
 - `--model <name>` — 특정 모델 전체 크롤
 - `--new` — 신작 크롤 (체크포인트 기반)
@@ -247,14 +255,14 @@ Local SQLite → rsync(Tailscale) → rclone(R2) → Cloud SQLite(Turso)
 
 ## 8. 영향 범위
 
-| 파일 | 변경 |
-|---|---|
-| `config/default.toml` | 신규 — git 추적 고정 설정 |
-| `src/vesper_x/config.py` | 수정 — 2중 config 로딩, CredentialConfig 추가 |
-| `src/vesper_x/extractors/hegre.py` | 신규 — HegreCrawler + HegreParser |
-| `src/vesper_x/db.py` | 신규 — SQLite DB 스키마 + CRUD |
-| `src/vesper_x/cli.py` | 수정 — hegre 크롤러 등록, --model/--new 옵션 |
-| `src/vesper_x/dispatchers/aria2.py` | 수정 — 쿠키/헤더 전달 지원 (필요 시) |
-| `tests/test_hegre.py` | 신규 — mock 기반 테스트 |
-| `tests/test_config_merge.py` | 신규 — 2중 config merge 테스트 |
-| `tests/test_db.py` | 신규 — DB CRUD 테스트 |
+| 파일                                  | 변경                                           |
+| ------------------------------------- | ---------------------------------------------- |
+| `config/default.toml`               | 신규 — git 추적 고정 설정                     |
+| `src/vesper_x/config.py`            | 수정 — 2중 config 로딩, CredentialConfig 추가 |
+| `src/vesper_x/extractors/hegre.py`  | 신규 — HegreCrawler + HegreParser             |
+| `src/vesper_x/db.py`                | 신규 — SQLite DB 스키마 + CRUD                |
+| `src/vesper_x/cli.py`               | 수정 — hegre 크롤러 등록, --model/--new 옵션  |
+| `src/vesper_x/dispatchers/aria2.py` | 수정 — 쿠키/헤더 전달 지원 (필요 시)          |
+| `tests/test_hegre.py`               | 신규 — mock 기반 테스트                       |
+| `tests/test_config_merge.py`        | 신규 — 2중 config merge 테스트                |
+| `tests/test_db.py`                  | 신규 — DB CRUD 테스트                         |
