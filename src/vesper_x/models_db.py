@@ -1,4 +1,4 @@
-"""models.db 접근 계층 — 캐노니컬 모델 사전 (vesper models 조회 + 메타데이터 통일의 공통 기반).
+"""cosplay.db 접근 계층 — 캐노니컬 모델 사전 (vesper models 조회 + 메타데이터 통일의 공통 기반).
 
 동기화 키 설계:
   models.id    - DB 내부 조인 전용
@@ -11,7 +11,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "models.db"
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "cosplay.db"
 
 
 # 일반명사 토큰은 모델 매칭에 쓰지 않는다 - "ZinieQ (ジニCosplayer)"와

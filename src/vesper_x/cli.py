@@ -63,7 +63,7 @@ def extract_tags_from_html_and_url(html_content: str, post_url: str) -> list[str
 def extract_models_from_tags_and_html(tags: list[str], html_content: str, post_url: str, config_models: list[str], canonicalize=None) -> list[str]:
     """Smart auto-extract model names from tags, config, and title.
 
-    canonicalize를 넘기면 사이트 표기 변형을 캐노니컬명(models.db)으로 통일해 기록한다.
+    canonicalize를 넘기면 사이트 표기 변형을 캐노니컬명(cosplay.db)으로 통일해 기록한다.
     """
     models = []
     for m in config_models:
@@ -449,8 +449,8 @@ def models(
     registry = ModelRegistry()
     info = registry.lookup(query)
     if info is None:
-        console.print(f"[yellow]'{query}' 을(를) models.db에서 찾을 수 없습니다. "
-                      f"(data/models.db 필요 - scripts/build_models_db.py)[/yellow]")
+        console.print(f"[yellow]'{query}' 을(를) cosplay.db에서 찾을 수 없습니다. "
+                      f"(data/cosplay.db 필요 - scripts/build_models_db.py)[/yellow]")
         raise typer.Exit(1)
 
     config = load_config()

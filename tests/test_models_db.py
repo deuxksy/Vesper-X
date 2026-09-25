@@ -1,4 +1,4 @@
-"""ModelRegistry — models.db 이름 사전 접근 계층 (A/B의 공통 기반)."""
+"""ModelRegistry — cosplay.db 이름 사전 접근 계층 (A/B의 공통 기반)."""
 import sqlite3
 from pathlib import Path
 
@@ -17,7 +17,7 @@ CREATE TABLE archive_artists (model_id INT, region TEXT, folder_name TEXT, album
 
 @pytest.fixture
 def db_path(tmp_path) -> Path:
-    db = sqlite3.connect(tmp_path / "models.db")
+    db = sqlite3.connect(tmp_path / "cosplay.db")
     db.executescript(SCHEMA)
     db.execute("INSERT INTO sites VALUES (1, 'misskon.com', '2026-09-07', '')")
     db.execute("INSERT INTO sites VALUES (2, 'cosplaytele.com', '2026-09-07', '')")
@@ -33,7 +33,7 @@ def db_path(tmp_path) -> Path:
     db.execute("INSERT INTO model_names VALUES (2, 11, 'Rinaijiao-(日奈娇)', 35, NULL)")
     db.commit()
     db.close()
-    return tmp_path / "models.db"
+    return tmp_path / "cosplay.db"
 
 
 def test_canonicalize_exact_variant(db_path):

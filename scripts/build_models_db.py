@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""data/*.tsv 전수조사 스냅샷에서 data/models.db를 재생성한다.
+"""data/*.tsv 전수조사 스냅샷에서 data/cosplay.db를 재생성한다.
 
 스키마: sites / models(캐노니컬) / model_names(사이트별 변형) + v_model_summary 뷰.
 변형 매칭: 로마·CJK 토큰 교집합 + 공백 제거 flat containment.
@@ -117,8 +117,8 @@ def derive_grade(misskon: int, cosplaytele: int, owned: int, region: str = None)
 
 def build():
     mk_rows, ct_rows = load()
-    preserved = _existing_model_prefs(DATA_DIR / "models.db")
-    db = sqlite3.connect(DATA_DIR / 'models.db')
+    preserved = _existing_model_prefs(DATA_DIR / "cosplay.db")
+    db = sqlite3.connect(DATA_DIR / 'cosplay.db')
     db.executescript("""
 DROP VIEW IF EXISTS v_model_summary;
 DROP TABLE IF EXISTS model_counts;
@@ -291,7 +291,7 @@ GROUP BY m.id;
     db.commit()
     n = db.execute("SELECT COUNT(*) FROM model_names").fetchone()[0]
     db.close()
-    print(f"data/models.db 재생성 완료 - model_names {n}행 (census: {census_date})")
+    print(f"data/cosplay.db 재생성 완료 - model_names {n}행 (census: {census_date})")
 
 
 def _tsv_date(fname: str) -> str:
