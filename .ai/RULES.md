@@ -55,6 +55,7 @@ Pipeline: CLI → BrowserFetcher(proxy+Chrome) → Crawler → Parser → Bypass
 - **mediafire 직링크는 resolve한 IP에 묶인다** — 프록시(SG)로 resolve하면 heritage가 홈페이지 HTML(36KB)을 받는다(2026-09-07 실측). mediafire 페이지 fetch는 반드시 직접 경로(`proxy=None`)
 - **misskon 멀티페이지 포스트**는 다운로드 링크가 `/N/` 뒷 페이지에만 있기도 하다(baegjm06 실측) — `resolve_post`가 `a.post-page-numbers` 전 페이지를 병합해 파싱한다
 - **dispatch_log**(cosplay.db) — crawl이 이미 전송한 post URL을 skip한다("신작만" 재크롤). 과거 이력이 없어 첫 크롤은 전량 받는다; 보유 분류가 필요한 신작만은 extract-only → heritage 보유 diff → delta dispatch
+- **수집/다운로드 2-phase**: `crawl --collect`가 resolve 결과를 dispatch_log 큐(`status='collected'`)에만 저장하고, `vesper dispatch`가 별도로 재 resolve+전송한다. 큐 url 키는 파일 단위 불변 식별자(mediafire file_page_url) — 포스트당 part1/part2 분할도 별도 행. mediafire 직링크는 resolve IP 바인딩+만료라 dispatch 직전 재 resolve 필수, mega는 저장된 direct_url pass-through. `dispatched` 행은 재수집이 덮어쓰지 않고 `failed`는 재수집으로 재시도 가능
 - aria2 host는 `ws://`로 설정해도 `Aria2Dispatcher`가 http(s)로 변환한다
 - aria2 dispatch는 `[aria2] download_dir`(daemon-side 경로, `/downloads` = host `/mnt/data2/torrent/downloads/aria`) 아래 사이트 서브디렉토리(`misskon/`, `cosplaytele/`, `H/`)로 전송한다 — heritage `extract_organize.sh`가 이 디렉토리로 압축 비번을 분기함 (misskon: `misskon.com`→`mrcong.com`, cosplaytele: `cosplaytele`). Hegre는 filename에 `모델/앨범/파일` 상대경로를 실어 `H/{모델명}/{앨범}/` 계층 형성
 - **Hegre(H) 인증 다운로드** (2026-09-25 실측): `login` 쿠키만으로 CDN(content/cc.hegre.com) 200 — Referer 불필요, IP 바인딩 없음(직접/프록시 모두 200). members-only 링크는 비인증 HTML에도 노출되나 다운로드는 login 쿠키 필요(401). 쿠키는 수일 TTL — persistent profile(`~/.config/url-resolver/hegre_profile`)에 저장, 만료 시 재로그인

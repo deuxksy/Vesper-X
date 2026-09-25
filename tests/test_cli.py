@@ -173,3 +173,125 @@ def test_crawl_waits_when_aria2_queue_is_full():
         result = runner.invoke(app, ["crawl", "https://misskon.com/tag/t/"])
         assert result.exit_code == 0
     assert mock_sleep.call_count >= 2
+
+
+# --- collect/dispatch 2-phase 분리 ---
+
+def test_crawl_collect_mode_queues_without_dispatch():
+    """crawl --collect: resolve 결과를 dispatch_log 큐에만 넣고 dispatch는 안 한다."""
+    from unittest.mock import MagicMock
+    from vesper_x.config import AppConfig
+    from vesper_x.models import DownloadMetadata
+
+    page1 = '<h2 class="post-box-title"><a href="https://misskon.com/p1/">P1</a></h2>'
+    meta = DownloadMetadata(
+        direct_url="https://download.mediafire.net/x/set.rar",
+        referer="https://misskon.com/p1/", user_agent="ua",
+        filename="set.rar", source_page="https://misskon.com/p1/",
+        file_page_url="https://www.mediafire.com/file/abc123/set.rar")
+    fetcher = MagicMock()
+    fetcher.fetch.side_effect = [page1]
+
+    registry_stub = MagicMock()
+    registry_stub.is_dispatched.return_value = False
+    with patch("vesper_x.cli.BrowserFetcher") as bf_cls, \
+         patch("vesper_x.cli.load_config", return_value=AppConfig(proxy=None)), \
+         patch("vesper_x.cli.resolve_post", return_value=[meta]), \
+         patch("vesper_x.cli.ModelRegistry", return_value=registry_stub), \
+         patch("vesper_x.cli.Aria2Dispatcher") as disp_cls:
+        bf_cls.return_value.__enter__.return_value = fetcher
+        result = runner.invoke(app, ["crawl", "https://misskon.com/tag/t/",
+                                     "--pages", "1", "--collect"])
+        assert result.exit_code == 0
+        disp_cls.assert_not_called()  # dispatcher 생성 없음
+        registry_stub.record_collect.assert_called_once()
+        call = registry_stub.record_collect.call_args.kwargs
+        assert call["file_page_url"] == "https://www.mediafire.com/file/abc123/set.rar"
+        assert call["post_url"] == "https://misskon.com/p1/"
+        assert call["filename"] == "set.rar"
+
+
+def test_dispatch_command_resolves_mediafire_and_marks_dispatched():
+    """dispatch: mediafire는 dispatch 직전 재 resolve, 성공 시 mark_dispatched."""
+    from unittest.mock import MagicMock
+    from vesper_x.config import AppConfig
+
+    pending = [{
+        "url": "https://www.mediafire.com/file/abc123/set.rar",
+        "post_url": "https://misskon.com/p1/", "title": "P1",
+        "site": "misskon", "note": "set.rar",
+        "direct_url": "https://old.mediafire.net/stale.rar", "status": "collected",
+    }]
+    registry_stub = MagicMock()
+    registry_stub.pending_collects.return_value = pending
+    mf_resp = MagicMock()
+    mf_resp.text = "<html>mf page</html>"
+    with patch("vesper_x.cli.load_config", return_value=AppConfig(proxy=None)), \
+         patch("vesper_x.cli.ModelRegistry", return_value=registry_stub), \
+         patch("vesper_x.cli.Aria2Dispatcher") as disp_cls, \
+         patch("vesper_x.cli.httpx.get", return_value=mf_resp) as mock_get, \
+         patch("vesper_x.cli.MediafireResolver") as mf_cls:
+        disp_cls.return_value.waiting_count.return_value = 0
+        disp_cls.return_value.dispatch.return_value = "gid9"
+        mf_cls.return_value.extract_direct_url.return_value = "https://new.mediafire.net/set.rar"
+        result = runner.invoke(app, ["dispatch"])
+        assert result.exit_code == 0
+        # mediafire 재 resolve는 직접 경로 (IP 바인딩 - proxy=None)
+        assert mock_get.call_args.kwargs.get("proxy", "MISSING") is None
+        # dispatch된 direct_url은 재 resolve 결과
+        dispatched_meta = disp_cls.return_value.dispatch.call_args.args[0]
+        assert dispatched_meta.direct_url == "https://new.mediafire.net/set.rar"
+        assert dispatched_meta.filename == "set.rar"
+        registry_stub.mark_dispatched.assert_called_once_with(
+            pending[0]["url"], direct_url="https://new.mediafire.net/set.rar")
+
+
+def test_dispatch_command_non_mediafire_uses_stored_direct_url():
+    """mega 등 재 resolve 불가 링크는 저장된 direct_url을 그대로 dispatch한다."""
+    from unittest.mock import MagicMock
+    from vesper_x.config import AppConfig
+
+    pending = [{
+        "url": "https://mega.nz/file/xyz", "post_url": "https://misskon.com/p2/",
+        "title": "P2", "site": "misskon", "note": "m.rar",
+        "direct_url": "https://mega.nz/file/xyz", "status": "collected",
+    }]
+    registry_stub = MagicMock()
+    registry_stub.pending_collects.return_value = pending
+    with patch("vesper_x.cli.load_config", return_value=AppConfig(proxy=None)), \
+         patch("vesper_x.cli.ModelRegistry", return_value=registry_stub), \
+         patch("vesper_x.cli.Aria2Dispatcher") as disp_cls, \
+         patch("vesper_x.cli.httpx.get") as mock_get:
+        disp_cls.return_value.waiting_count.return_value = 0
+        disp_cls.return_value.dispatch.return_value = "gid8"
+        result = runner.invoke(app, ["dispatch"])
+        assert result.exit_code == 0
+        mock_get.assert_not_called()  # 재 resolve 없음
+        registry_stub.mark_dispatched.assert_called_once()
+
+def test_dispatch_command_failure_marks_failed():
+    from unittest.mock import MagicMock
+    from vesper_x.config import AppConfig
+
+    pending = [{
+        "url": "https://www.mediafire.com/file/dead/x.rar",
+        "post_url": "https://misskon.com/p3/", "title": "P3",
+        "site": "misskon", "note": "x.rar",
+        "direct_url": None, "status": "collected",
+    }]
+    registry_stub = MagicMock()
+    registry_stub.pending_collects.return_value = pending
+    mf_resp = MagicMock()
+    mf_resp.text = "<html>expired</html>"
+    with patch("vesper_x.cli.load_config", return_value=AppConfig(proxy=None)), \
+         patch("vesper_x.cli.ModelRegistry", return_value=registry_stub), \
+         patch("vesper_x.cli.Aria2Dispatcher") as disp_cls, \
+         patch("vesper_x.cli.httpx.get", return_value=mf_resp), \
+         patch("vesper_x.cli.MediafireResolver") as mf_cls:
+        disp_cls.return_value.waiting_count.return_value = 0
+        mf_cls.return_value.extract_direct_url.return_value = None  # 재 resolve도 실패
+        result = runner.invoke(app, ["dispatch"])
+        assert result.exit_code == 0
+        registry_stub.mark_failed.assert_called_once()
+        registry_stub.mark_dispatched.assert_not_called()
+        disp_cls.return_value.dispatch.assert_not_called()

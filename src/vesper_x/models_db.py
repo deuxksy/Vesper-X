@@ -84,20 +84,95 @@ class ModelRegistry:
             dispatched_at TEXT DEFAULT (datetime('now')),
             note TEXT,
             direct_url TEXT,
-            model_id INTEGER)""")
+            model_id INTEGER,
+            status TEXT,
+            post_url TEXT,
+            title TEXT,
+            site TEXT,
+            collected_at TEXT,
+            attempted_at TEXT,
+            error TEXT)""")
         # 기존 테이블 컬럼 마이그레이션
         cols = {r[1] for r in conn.execute("PRAGMA table_info(dispatch_log)")}
-        for col in ("direct_url", "model_id"):
+        for col in ("direct_url", "model_id", "status", "post_url", "title",
+                    "site", "collected_at", "attempted_at", "error"):
             if col not in cols:
                 conn.execute(f"ALTER TABLE dispatch_log ADD COLUMN {col} TEXT")
 
+    # url 키는 파일 단위 불변 식별자다: collect 행은 mediafire/mega 파일페이지 URL,
+    # legacy 행은 post URL. status NULL(legacy)은 dispatched로 취급한다.
+    _DISPATCHED_EXPR = "COALESCE(status, 'dispatched') = 'dispatched'"
+
     def is_dispatched(self, url: str) -> bool:
-        """이미 aria2에 전송한 post URL인지 - 재크롤 중복 스킵용."""
+        """이미 aria2에 전송한 URL인지 - 재크롤 중복 스킵용."""
         conn = self._connect()
         if conn is None:
             return False
         self._ensure_dispatch_log(conn)
-        return conn.execute("SELECT 1 FROM dispatch_log WHERE url = ?", (url,)).fetchone() is not None
+        return conn.execute(
+            f"SELECT 1 FROM dispatch_log WHERE url = ? AND {self._DISPATCHED_EXPR}",
+            (url,)).fetchone() is not None
+
+    def record_collect(self, file_page_url: str, post_url: str, title: str,
+                       site: str, direct_url: Optional[str] = None,
+                       model_name: Optional[str] = None,
+                       filename: Optional[str] = None) -> None:
+        """수집 결과를 collected로 기록. dispatched 행은 재수집이 덮어쓰지 않는다."""
+        conn = self._connect()
+        if conn is None:
+            return
+        self._ensure_dispatch_log(conn)
+        model_id = self._resolve_model_id(model_name) if model_name else None
+        conn.execute(
+            """INSERT INTO dispatch_log (url, post_url, title, site, note,
+               direct_url, model_id, status, collected_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'collected', datetime('now'))
+               ON CONFLICT(url) DO UPDATE SET
+                 post_url=excluded.post_url, title=excluded.title,
+                 site=excluded.site, note=excluded.note,
+                 direct_url=excluded.direct_url, model_id=excluded.model_id,
+                 status='collected', collected_at=datetime('now'), error=NULL
+               WHERE COALESCE(dispatch_log.status, 'dispatched') <> 'dispatched'""",
+            (file_page_url, post_url, title, site, filename, direct_url, model_id))
+        conn.commit()
+
+    def pending_collects(self, limit: int = 100) -> list[dict]:
+        """dispatch 대기 중인 수집 항목 (collected 상태, 오래된 순)."""
+        conn = self._connect()
+        if conn is None:
+            return []
+        self._ensure_dispatch_log(conn)
+        rows = conn.execute(
+            """SELECT url, post_url, title, site, note, direct_url, status FROM dispatch_log
+               WHERE status = 'collected'
+               ORDER BY COALESCE(collected_at, dispatched_at) LIMIT ?""",
+            (limit,)).fetchall()
+        return [dict(zip(("url", "post_url", "title", "site", "note", "direct_url", "status"), r))
+                for r in rows]
+
+    def mark_dispatched(self, url: str, direct_url: Optional[str] = None) -> None:
+        """dispatch 성공 갱신 - direct_url은 실제 전송된 링크로 갱신한다."""
+        conn = self._connect()
+        if conn is None:
+            return
+        self._ensure_dispatch_log(conn)
+        conn.execute(
+            """UPDATE dispatch_log SET status='dispatched',
+               dispatched_at=datetime('now'),
+               direct_url=COALESCE(?, direct_url) WHERE url = ?""",
+            (direct_url, url))
+        conn.commit()
+
+    def mark_failed(self, url: str, error: str) -> None:
+        conn = self._connect()
+        if conn is None:
+            return
+        self._ensure_dispatch_log(conn)
+        conn.execute(
+            """UPDATE dispatch_log SET status='failed',
+               attempted_at=datetime('now'), error=? WHERE url = ?""",
+            (error, url))
+        conn.commit()
 
     def record_dispatch(self, url: str, note: Optional[str] = None,
                         direct_url: Optional[str] = None,

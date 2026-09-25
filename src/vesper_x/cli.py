@@ -599,17 +599,18 @@ def run_hegre_crawl(url: Optional[str], model: Optional[str], new_only: bool,
 
 def run_crawl(url: str, pages: int = 1, limit: int = 0, extract_only: bool = False,
               output: Optional[str] = None, json_output: bool = False,
-              config: Optional[AppConfig] = None):
+              config: Optional[AppConfig] = None, collect: bool = False):
     """Crawl category or tag listing across multiple pages and process all posts.
 
-    페이지를 페치할 때마다 해당 post를 즉시 resolve+dispatch 한다 (최신 페이지 우선, 스트리밍)."""
+    페이지를 페치할 때마다 해당 post를 즉시 resolve+dispatch 한다 (최신 페이지 우선, 스트리밍).
+    collect=True면 resolve 결과를 dispatch_log 큐(collected)에만 저장하고 dispatch는 하지 않는다."""
     tag_match = re.search(r"/(?:tag|category)/([^/]+)/", url)
     tag_slug = tag_match.group(1) if tag_match else None
 
     config = config or load_config()
     # 사이트별 crawler는 config [sites]가 결정한다
     crawler = _select_crawler(url, config)
-    dispatcher = None if extract_only else Aria2Dispatcher(config)
+    dispatcher = None if (extract_only or collect) else Aria2Dispatcher(config)
 
     visited_pages = set()
     visited_posts: set[str] = set()
@@ -654,6 +655,24 @@ def run_crawl(url: str, pages: int = 1, limit: int = 0, extract_only: bool = Fal
 
                 metadata = resolve_post(post_url, config=config, current_tag=tag_slug, fetcher=fetcher)
                 all_metadata.extend(metadata)
+
+                if collect:
+                    # 수집 모드: dispatch_log 큐에 collected로 저장만 한다.
+                    # url 키는 파일 단위 불변 식별자(file_page_url)다
+                    post_title = post_url.rstrip("/").rsplit("/", 1)[-1]
+                    post_host = urllib.parse.urlparse(post_url).hostname or ""
+                    site_name = next((sc.subdir for dom, sc in config.sites.items()
+                                      if post_host == dom or post_host.endswith("." + dom)),
+                                     "etc")
+                    for m in metadata:
+                        registry.record_collect(
+                            file_page_url=m.file_page_url or m.direct_url,
+                            post_url=post_url, title=post_title,
+                            site=site_name,
+                            direct_url=m.direct_url, filename=m.filename,
+                            model_name=m.models[0] if m.models else None)
+                        console.print(f"[bold magenta]Queued[/bold magenta] - {m.filename or m.direct_url[:60]}")
+                    continue
 
                 if dispatcher:
                     for m in metadata:
@@ -700,6 +719,7 @@ def crawl(
     site: Optional[str] = typer.Option(None, "--site", help="사이트 명시 선택 (hegre)"),
     model: Optional[str] = typer.Option(None, "--model", help="모델 전체 크롤 (hegre)"),
     new: bool = typer.Option(False, "--new", help="신작 크롤 (체크포인트 기반)"),
+    collect: bool = typer.Option(False, "--collect", help="수집만: dispatch_log 큐에 저장 (dispatch는 별도 커맨드)"),
 ):
     """Crawl category or tag listing across multiple pages and process all posts."""
     if site == "hegre" or (url and _is_hegre_url(url)):
@@ -712,7 +732,62 @@ def crawl(
     if skip_gofile:
         cfg.skip_gofile = True
     run_crawl(url, pages=pages, limit=limit, extract_only=extract_only,
-              output=output, json_output=json_output, config=cfg)
+              output=output, json_output=json_output, config=cfg, collect=collect)
+
+
+@app.command()
+def dispatch(
+    limit: int = typer.Option(0, "--limit", help="최대 처리 수 (0=전체)"),
+):
+    """collected 수집 큐를 다운로드한다 - mediafire는 dispatch 직전 재 resolve."""
+    config = load_config()
+    registry = ModelRegistry()
+    items = registry.pending_collects(limit=limit or 1000)
+    if not items:
+        console.print("[yellow]대기 중인 수집 항목이 없다[/yellow]")
+        return
+    console.print(f"[bold]{len(items)}건 다운로드 시작[/bold]")
+    dispatcher = Aria2Dispatcher(config)
+    resolver = MediafireResolver()
+    ok = fail = 0
+    for item in items:
+        url = item["url"]
+        direct = item["direct_url"]
+        if "mediafire.com" in url:
+            # mediafire 직링크는 resolve IP에 묶이고 만료된다 - dispatch 직전 재 resolve
+            try:
+                resp = httpx.get(url, headers={"User-Agent": DEFAULT_USER_AGENT},
+                                 follow_redirects=True, timeout=30.0, proxy=None)
+                direct = resolver.extract_direct_url(resp.text)
+            except Exception as e:
+                console.print(f"[bold red]mediafire 재 resolve 실패 {url}: {e}[/bold red]")
+                direct = None
+        if not direct:
+            registry.mark_failed(url, error="resolve failed")
+            fail += 1
+            continue
+        while int(dispatcher.waiting_count()) > 0:
+            console.print(f"[dim]aria2 대기 있음 [{dispatcher.format_status(dispatcher.status_summary())}] - 30초 대기...[/dim]")
+            time.sleep(30)
+        try:
+            meta = DownloadMetadata(
+                direct_url=direct,
+                referer=item["post_url"],
+                user_agent=DEFAULT_USER_AGENT,
+                filename=item["note"],
+                source_page=item["post_url"],
+                file_page_url=url,
+            )
+            gid = dispatcher.dispatch(meta)
+            registry.mark_dispatched(url, direct_url=direct)
+            ok += 1
+            console.print(f"[bold green]Dispatched to aria2[/bold green] "
+                          f"(GID: [cyan]{gid}[/cyan]) - {item['note'] or url}")
+        except Exception as e:
+            registry.mark_failed(url, error=str(e))
+            fail += 1
+            console.print(f"[bold red]dispatch 실패 {url}: {e}[/bold red]")
+    console.print(f"[bold]완료: dispatch {ok}, 실패 {fail}[/bold]")
 
 
 @app.command()

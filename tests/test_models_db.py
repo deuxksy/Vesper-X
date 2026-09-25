@@ -133,3 +133,79 @@ def test_dispatch_log_records_model_id(db_path):
     expected = reg._connect().execute(
         "SELECT id FROM models WHERE canonical_name='Byoru'").fetchone()[0]
     assert row[0] == expected
+
+
+# --- dispatch_log 큐 확장 (collect/dispatch 분리) ---
+
+def test_collect_columns_migration(db_path):
+    """기존 dispatch_log 테이블에 큐 컬럼이 자동 추가된다."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("""CREATE TABLE dispatch_log (
+        url TEXT PRIMARY KEY, dispatched_at TEXT DEFAULT (datetime('now')),
+        note TEXT, direct_url TEXT, model_id INTEGER)""")
+    conn.commit(); conn.close()
+    reg = ModelRegistry(db_path)
+    reg.record_collect(
+        file_page_url="https://mediafire.com/file/abc/x.rar",
+        post_url="https://misskon.com/1", title="t", site="misskon",
+        direct_url="https://dl.mediafire.com/x.rar", model_name=None)
+    conn = sqlite3.connect(db_path)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(dispatch_log)")}
+    conn.close()
+    assert {"status", "post_url", "title", "site", "collected_at",
+            "attempted_at", "error"} <= cols
+
+
+def test_record_collect_and_pending(db_path):
+    reg = ModelRegistry(db_path)
+    reg.record_collect(
+        file_page_url="https://mediafire.com/file/abc/x.rar",
+        post_url="https://misskon.com/1", title="纲手", site="misskon",
+        direct_url="https://dl/x.rar", model_name="黏黏团子兔",
+        filename="x.rar")
+    pending = reg.pending_collects()
+    assert len(pending) == 1
+    row = pending[0]
+    assert row["url"] == "https://mediafire.com/file/abc/x.rar"
+    assert row["post_url"] == "https://misskon.com/1"
+    assert row["site"] == "misskon"
+    assert row["status"] == "collected"
+    assert row["note"] == "x.rar"  # filename
+
+
+def test_record_collect_protects_dispatched(db_path):
+    """이미 dispatched된 URL은 재수집이 덮어쓰지 않는다."""
+    reg = ModelRegistry(db_path)
+    url = "https://mediafire.com/file/abc/x.rar"
+    reg.record_dispatch(url, note="done.rar")
+    reg.record_collect(file_page_url=url, post_url="p", title="t",
+                       site="misskon", direct_url="d", model_name=None)
+    assert reg.pending_collects() == []  # dispatched 유지, collected 미발생
+
+
+def test_mark_dispatched_and_failed(db_path):
+    reg = ModelRegistry(db_path)
+    url = "https://mediafire.com/file/abc/x.rar"
+    reg.record_collect(file_page_url=url, post_url="p", title="t",
+                       site="misskon", direct_url="d", model_name=None)
+    reg.mark_failed(url, error="resolve failed")
+    assert reg.pending_collects() == []           # failed는 pending 아님
+    reg.record_collect(file_page_url=url, post_url="p", title="t",
+                       site="misskon", direct_url="d", model_name=None)  # 재수집 → 재시도
+    assert len(reg.pending_collects()) == 1
+    reg.mark_dispatched(url, direct_url="https://dl/new.rar")
+    assert reg.pending_collects() == []
+    assert reg.is_dispatched(url)
+    assert not reg.is_dispatched("https://mediafire.com/file/none/x")
+
+
+def test_is_dispatched_legacy_null_status_treated_dispatched(db_path):
+    """기존 행(status NULL)은 dispatched로 취급 - 하위 호환."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("""CREATE TABLE dispatch_log (
+        url TEXT PRIMARY KEY, dispatched_at TEXT, note TEXT, direct_url TEXT,
+        model_id INTEGER)""")
+    conn.execute("INSERT INTO dispatch_log (url) VALUES ('https://misskon.com/old')")
+    conn.commit(); conn.close()
+    reg = ModelRegistry(db_path)
+    assert reg.is_dispatched("https://misskon.com/old")
