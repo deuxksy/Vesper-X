@@ -108,7 +108,7 @@ def test_resolve_content_video():
     assert len(results) == 1
     m = results[0]
     assert m.direct_url == "https://cdn.hegre.com/vid/2160.mp4"
-    assert m.filename == "2160.mp4"
+    assert m.filename == "Charlie Atropos/massage-x/2160.mp4"
     assert m.source_page == "https://hegre.com/films/massage-x"
     assert m.file_page_url == "https://hegre.com/films/massage-x"
     assert m.models == ["Charlie Atropos"]
@@ -118,7 +118,8 @@ def test_resolve_content_photo_zip():
     crawler = _crawler()
     results = crawler.resolve_content(GALLERY_PAGE, "https://hegre.com/galleries/serenity")
     assert results[0].direct_url == "https://cdn.hegre.com/zip/large.zip"
-    assert results[0].filename == "large.zip"
+    # GALLERY_PAGE에는 모델 링크가 없다 - Unknown 폴백
+    assert results[0].filename == "Unknown/serenity/large.zip"
 
 
 def test_resolve_content_empty_page():
@@ -146,8 +147,9 @@ from vesper_x.premium_db import PremiumDB
 class FakeCrawler:
     """fetch/resolve_content를 HTML 응답으로 대체하는 테스트 더블."""
 
-    def __init__(self, pages: dict[str, str]):
+    def __init__(self, pages: dict[str, str], refs: list[dict] | None = None):
         self.pages = pages
+        self.refs = refs or []
         self.parser = HegreParser()
 
     def ensure_credentials(self):
@@ -158,6 +160,9 @@ class FakeCrawler:
             raise RuntimeError(f"unexpected fetch: {url}")
         return self.pages[url]
 
+    async def collect(self, model_slug=None, max_pages=10):
+        return self.refs
+
     def resolve_content(self, html: str, page_url: str):
         return HegreCrawler.resolve_content(self, html, page_url)
 
@@ -166,7 +171,25 @@ def _cfg():
     return AppConfig(credentials={"hegre": CredentialConfig("u", "p")})
 
 
-def test_run_hegre_crawl_dispatches_and_records(tmp_path):
+def test_run_hegre_crawl_dispatches_and_records(tmp_path, monkeypatch):
+    db = PremiumDB(tmp_path / "premium.db")
+    crawler = FakeCrawler({
+        "https://hegre.com/films/massage-x": VIDEO_PAGE,
+    })
+
+    class FakeDispatcher:
+        def dispatch(self, m):
+            return "gid-1"
+
+    monkeypatch.setattr("vesper_x.cli.Aria2Dispatcher", lambda cfg: FakeDispatcher())
+    run_hegre_crawl(url="https://hegre.com/films/massage-x", model=None,
+                    new_only=False, extract_only=False, limit=0,
+                    config=_cfg(), db=db, crawler=crawler)
+    assert db.is_downloaded("https://hegre.com/films/massage-x")
+
+
+def test_run_hegre_crawl_extract_only_does_not_record(tmp_path):
+    """extract-only는 dispatch하지 않으므로 skip 상태를 오염시키지 않는다."""
     db = PremiumDB(tmp_path / "premium.db")
     crawler = FakeCrawler({
         "https://hegre.com/films/massage-x": VIDEO_PAGE,
@@ -174,7 +197,7 @@ def test_run_hegre_crawl_dispatches_and_records(tmp_path):
     run_hegre_crawl(url="https://hegre.com/films/massage-x", model=None,
                     new_only=False, extract_only=True, limit=0,
                     config=_cfg(), db=db, crawler=crawler)
-    assert db.is_downloaded("https://hegre.com/films/massage-x")
+    assert not db.is_downloaded("https://hegre.com/films/massage-x")
 
 
 def test_run_hegre_crawl_skips_dispatched(tmp_path):
@@ -211,3 +234,62 @@ def test_run_hegre_crawl_no_credentials_exits(tmp_path):
         run_hegre_crawl(url="https://hegre.com/films/x", model=None,
                         new_only=False, extract_only=True, limit=0,
                         config=AppConfig(), db=db, crawler=crawler)
+
+
+# --- final review fix pass ---
+
+def test_select_crawler_registry_has_hegre():
+    from vesper_x.cli import _select_crawler
+    crawler = _select_crawler("https://hegre.com/films/x", AppConfig())
+    assert isinstance(crawler, HegreCrawler)
+
+
+def test_is_hegre_url_hostname_based():
+    from vesper_x.cli import _is_hegre_url
+    assert _is_hegre_url("https://hegre.com/films/x")
+    assert _is_hegre_url("https://HEGRE.COM/films/x")      # 대소문자 무관
+    assert _is_hegre_url("https://www.hegre.com/films/x")
+    assert not _is_hegre_url("https://hegre.com.evil.example/x")  # 접미 도메인 위장
+    assert not _is_hegre_url("https://evil.example/?ref=hegre.com")
+
+
+def test_run_hegre_crawl_continues_after_item_failure(tmp_path, monkeypatch):
+    db = PremiumDB(tmp_path / "premium.db")
+
+    class FakeDispatcher:
+        def dispatch(self, m):
+            return "gid"
+
+    monkeypatch.setattr("vesper_x.cli.Aria2Dispatcher", lambda cfg: FakeDispatcher())
+    # broken은 pages에 없어 fetch가 RuntimeError → 해당 ref만 건너뛰고 ok는 dispatch+기록
+    crawler = FakeCrawler({
+        "https://hegre.com/films/ok": VIDEO_PAGE,
+    }, refs=[
+        {"url": "https://hegre.com/films/broken", "title": "broken"},
+        {"url": "https://hegre.com/films/ok", "title": "ok"},
+    ])
+    run_hegre_crawl(url=None, model=None, new_only=False,
+                    extract_only=False, limit=0,
+                    config=_cfg(), db=db, crawler=crawler)
+    assert db.is_downloaded("https://hegre.com/films/ok")
+    assert not db.is_downloaded("https://hegre.com/films/broken")
+
+
+def test_placeholder_selectors_registered():
+    from vesper_x.extractors.hegre import SELECTORS, URLS
+    assert SELECTORS["next_page"]
+    assert URLS["content_path"]
+
+
+def test_resolve_content_filename_includes_model_album():
+    """spec 4.1: H/{모델명}/{앨범 제목}/ 계층 — filename에 상대경로 포함."""
+    crawler = _crawler()
+    results = crawler.resolve_content(VIDEO_PAGE, "https://hegre.com/films/massage-x")
+    assert results[0].filename == "Charlie Atropos/massage-x/2160.mp4"
+
+
+def test_hegre_crawler_fetch_not_implemented_before_task6():
+    import asyncio
+    crawler = _crawler()
+    with pytest.raises(NotImplementedError):
+        asyncio.run(crawler.fetch("https://hegre.com/films/x"))

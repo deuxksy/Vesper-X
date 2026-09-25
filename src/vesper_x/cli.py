@@ -92,11 +92,18 @@ def run_async(coro):
         return ex.submit(asyncio.run, coro).result()
 
 
+def _is_hegre_url(url: str) -> bool:
+    """Hegre 분기 판정은 hostname 기준 - 부분문자열 검사 금지 (ouo /st/ 교훈)."""
+    host = urllib.parse.urlparse(url).hostname or ""
+    return host == "hegre.com" or host.endswith(".hegre.com")
+
+
 def _select_crawler(url: str, config: AppConfig):
     """config [sites]의 도메인 매칭으로 crawler를 고른다 - 미등록 도메인은 category 기본."""
     crawlers = {
         "category": CategoryCrawler,
         "cosplaytele": CosplayteleCrawler,
+        "hegre": lambda: HegreCrawler(config),
     }
     host = urllib.parse.urlparse(url).hostname or ""
     for domain, site in config.sites.items():
@@ -111,7 +118,7 @@ def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag:
 
     # Hegre는 인증 세션이 필요해 기존 httpx/fetcher 경로를 타지 않는다 -
     # 전용 crawler 세션(Task 6 완성)으로 fetch+resolve한다
-    if "hegre.com" in post_url:
+    if _is_hegre_url(post_url):
         crawler = HegreCrawler(config)
         html = run_async(crawler.fetch(post_url))
         return crawler.resolve_content(html, post_url)
@@ -558,22 +565,33 @@ def run_hegre_crawl(url: Optional[str], model: Optional[str], new_only: bool,
         if db.is_downloaded(ref["url"]):
             console.print(f"[dim]skip (dispatched): {ref['url']}[/dim]")
             continue
-        html = run_async(crawler.fetch(ref["url"]))
-        metadata_list = crawler.resolve_content(html, ref["url"])
-        if not metadata_list:
-            console.print(f"[yellow]다운로드 링크 없음: {ref['url']}[/yellow]")
+        try:
+            html = run_async(crawler.fetch(ref["url"]))
+            metadata_list = crawler.resolve_content(html, ref["url"])
+            if not metadata_list:
+                console.print(f"[yellow]다운로드 링크 없음: {ref['url']}[/yellow]")
+                continue
+            for m in metadata_list:
+                if dispatcher:
+                    gid = dispatcher.dispatch(m)
+                    console.print(f"[bold green]Dispatched to aria2[/bold green] "
+                                  f"(GID: [cyan]{gid}[/cyan]) - {m.filename}")
+                    # 이력 기록은 dispatch 성공 후에만 - extract-only가 skip 상태를
+                    # 오염시키지 않는다 (기존 handle_results와 동일 의미론)
+                    model_name = m.models[0] if m.models else "Unknown"
+                    model_id = db.upsert_model(model_name, "H")
+                    ctype = "video" if m.direct_url.split("?")[0].endswith(".mp4") else "photo"
+                    gallery_id = db.upsert_gallery(
+                        model_id, ref.get("title") or ref["url"], m.file_page_url, "H", ctype)
+                    db.record_download(gallery_id, m.file_page_url, m.filename)
+                else:
+                    console.print(f"[cyan]extract-only: {m.filename} - {m.direct_url}[/cyan]")
+        except NotImplementedError:
+            raise
+        except Exception as e:
+            # 1건 실패가 전체 크롤을 중단하지 않는다 (run_crawl/handle_results와 동일)
+            console.print(f"[bold red]Hegre 처리 실패 {ref['url']}: {e}[/bold red]")
             continue
-        for m in metadata_list:
-            if dispatcher:
-                gid = dispatcher.dispatch(m)
-                console.print(f"[bold green]Dispatched to aria2[/bold green] "
-                              f"(GID: [cyan]{gid}[/cyan]) - {m.filename}")
-            model_name = m.models[0] if m.models else "Unknown"
-            model_id = db.upsert_model(model_name, "H")
-            ctype = "video" if m.direct_url.endswith(".mp4") else "photo"
-            gallery_id = db.upsert_gallery(
-                model_id, ref.get("title") or ref["url"], m.file_page_url, "H", ctype)
-            db.record_download(gallery_id, m.file_page_url, m.filename)
     if new_only:
         db.update_crawl_checkpoint(
             "H", datetime.datetime.now(datetime.timezone.utc).isoformat())
@@ -684,7 +702,7 @@ def crawl(
     new: bool = typer.Option(False, "--new", help="신작 크롤 (체크포인트 기반)"),
 ):
     """Crawl category or tag listing across multiple pages and process all posts."""
-    if site == "hegre" or (url and "hegre.com" in url):
+    if site == "hegre" or (url and _is_hegre_url(url)):
         return run_hegre_crawl(url=url, model=model, new_only=new,
                                extract_only=extract_only, limit=limit)
     if not url:

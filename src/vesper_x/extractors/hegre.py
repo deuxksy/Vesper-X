@@ -16,12 +16,15 @@ from vesper_x.models import DownloadMetadata
 URLS = {
     "model": "https://hegre.com/models/{slug}",   # 가정 — Task 6 확정
     "updates": "https://hegre.com/update",        # 가정 — Task 6 확정
+    # 콘텐츠 경로 패턴(가정 — Task 6 확정): 목록에서 films/galleries 링크 식별용
+    "content_path": r"/(films?|galleries?|magazines?)/[\w-]+",
 }
 
 SELECTORS = {
     "download_links": "div.download a[href]",     # 가정 — Task 6 확정
     "gallery_zip": "a[href$='.zip']",             # 가정 — Task 6 확정
     "model_name": "a.model",                      # 가정 — Task 6 확정
+    "next_page": "a.next, li.pagination-next a, a[rel='next']",  # 가정 — Task 6 확정
 }
 
 _RESOLUTION_RE = re.compile(r"(\d{3,4})\s*p", re.IGNORECASE)
@@ -85,7 +88,7 @@ DEFAULT_USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                       "AppleWebKit/537.36 (KHTML, like Gecko) "
                       "Chrome/128.0.0.0 Safari/537.36")
 
-_CONTENT_PATH_RE = re.compile(r"/(films?|galleries?|magazines?)/[\w-]+")
+_CONTENT_PATH_RE = re.compile(URLS["content_path"])
 
 
 class HegreCrawler:
@@ -124,7 +127,7 @@ class HegreCrawler:
     @staticmethod
     def extract_next_page_url(html: str, base_url: str) -> Optional[str]:
         soup = BeautifulSoup(html, "html.parser")
-        a = soup.select_one("a.next, li.pagination-next a, a[rel='next']")
+        a = soup.select_one(SELECTORS["next_page"])
         return urljoin(base_url, a["href"]) if a and a.get("href") else None
 
     # --- resolve (dispatch 직전 호출 — spec 4.3) ---
@@ -137,11 +140,16 @@ class HegreCrawler:
         if not best:
             return []
         direct_url = best["url"]
+        # spec 4.1 계층 H/{모델명}/{앨범 제목}/ - aria2 out은 dir 기준 상대경로라
+        # filename에 모델/앨범 경로를 싣는다(dispatch는 aria2.py 불변)
+        basename = direct_url.split("?")[0].rsplit("/", 1)[-1]
+        album = urlparse(page_url).path.rstrip("/").rsplit("/", 1)[-1]
+        model_dir = re.sub(r"[^\w\- .()]+", "_", model_name) if model_name else "Unknown"
         return [DownloadMetadata(
             direct_url=direct_url,
             referer=page_url,
             user_agent=DEFAULT_USER_AGENT,
-            filename=direct_url.split("?")[0].rsplit("/", 1)[-1],
+            filename=f"{model_dir}/{album}/{basename}",
             source_page=page_url,
             models=[model_name] if model_name else [],
             file_page_url=page_url,
@@ -151,7 +159,7 @@ class HegreCrawler:
 
     async def collect(self, model_slug: Optional[str] = None,
                       max_pages: int = 10) -> list[dict]:
-        """모델/신작 목록 순회 — fetch·selector는 Task 6 실측에서 확정."""
+        """모델/신작 목록 순회 — selector는 Task 6 실측에서 확정."""
         base = (URLS["model"].format(slug=model_slug) if model_slug
                 else URLS["updates"])
         refs: list[dict] = []
@@ -163,6 +171,10 @@ class HegreCrawler:
             if not url:
                 break
         return refs
+
+    async def fetch(self, url: str) -> str:
+        """persistent Chrome 세션 fetch — Task 6 실측에서 구현한다."""
+        raise NotImplementedError("HegreCrawler.fetch는 Task 6 실측 후 구현")
 
     def _launch_kwargs(self) -> dict:
         kwargs: dict = {"channel": "chrome", "headless": False}

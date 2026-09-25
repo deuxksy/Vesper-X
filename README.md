@@ -12,7 +12,7 @@
 - **Shortener Bypass**: 단축링크 및 광고 페이지 Playwright 기반 브라우저 자동 우회
 - **Direct Link Extraction**: 파일 호스트(MediaFire, Gofile 등) 직링크 자동 변환
 - **Aria2 Dispatch**: aria2 RPC 데몬 연동 백그라운드 고속 전송
-- **Model Registry**: models.db 기반 모델명 통일·사이트별 보유/아카이브 현황 조회 (`vesper models`)
+- **Model Registry**: cosplay.db 기반 모델명 통일·사이트별 보유/아카이브 현황 조회 (`vesper models`)
 
 ---
 
