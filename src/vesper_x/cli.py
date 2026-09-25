@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 import re
 import subprocess
@@ -18,12 +19,14 @@ from vesper_x.dispatchers.aria2 import Aria2Dispatcher
 from vesper_x.extractors.crawler import CategoryCrawler
 from vesper_x.extractors.cosplaytele import CosplayteleParser, CosplayteleCrawler
 from vesper_x.extractors.gofile import GofileResolver
+from vesper_x.extractors.hegre import HegreCrawler
 from vesper_x.extractors.mediafire import MediafireResolver
 from vesper_x.extractors.misskon import MisskonParser
 from vesper_x.extractors.ouo import OuoBypasser
 from vesper_x.fetchers import BrowserFetcher
 from vesper_x.models import DownloadMetadata
 from vesper_x.models_db import ModelRegistry
+from vesper_x.premium_db import PremiumDB
 
 try:
     import pyperclip
@@ -105,6 +108,13 @@ def _select_crawler(url: str, config: AppConfig):
 def resolve_post(post_url: str, config: Optional[AppConfig] = None, current_tag: Optional[str] = None, fetcher: Optional[BrowserFetcher] = None) -> list[DownloadMetadata]:
     if config is None:
         config = load_config()
+
+    # Hegre는 인증 세션이 필요해 기존 httpx/fetcher 경로를 타지 않는다 -
+    # 전용 crawler 세션(Task 6 완성)으로 fetch+resolve한다
+    if "hegre.com" in post_url:
+        crawler = HegreCrawler(config)
+        html = run_async(crawler.fetch(post_url))
+        return crawler.resolve_content(html, post_url)
 
     headers = {"User-Agent": DEFAULT_USER_AGENT}
 
@@ -518,6 +528,57 @@ def parse(
     handle_results(metadata_list, extract_only=extract_only, output=output, copy=copy, json_output=json_output)
 
 
+def run_hegre_crawl(url: Optional[str], model: Optional[str], new_only: bool,
+                    extract_only: bool, limit: int,
+                    config: Optional[AppConfig] = None,
+                    db: Optional[PremiumDB] = None,
+                    crawler: Optional[HegreCrawler] = None) -> None:
+    """Hegre 크롤 — 목록 수집은 URL만, CDN resolve는 dispatch 직전 (spec 4.3).
+
+    skip 판정/이력은 premium.db 단일 소스다 (cosplay.db dispatch_log 미참조, spec 4.4).
+    """
+    config = config or load_config()
+    db = db or PremiumDB()
+    crawler = crawler or HegreCrawler(config)
+    creds = config.credentials.get("hegre")
+    if not creds or not creds.username:
+        console.print("[bold red]config.toml [credentials.hegre] 미설정 - "
+                      "username/password를 추가한다[/bold red]")
+        raise typer.Exit(1)
+
+    if url:
+        refs = [{"url": url, "title": url}]
+    else:
+        refs = run_async(crawler.collect(model_slug=model))
+    if limit:
+        refs = refs[:limit]
+
+    dispatcher = None if extract_only else Aria2Dispatcher(config)
+    for ref in refs:
+        if db.is_downloaded(ref["url"]):
+            console.print(f"[dim]skip (dispatched): {ref['url']}[/dim]")
+            continue
+        html = run_async(crawler.fetch(ref["url"]))
+        metadata_list = crawler.resolve_content(html, ref["url"])
+        if not metadata_list:
+            console.print(f"[yellow]다운로드 링크 없음: {ref['url']}[/yellow]")
+            continue
+        for m in metadata_list:
+            if dispatcher:
+                gid = dispatcher.dispatch(m)
+                console.print(f"[bold green]Dispatched to aria2[/bold green] "
+                              f"(GID: [cyan]{gid}[/cyan]) - {m.filename}")
+            model_name = m.models[0] if m.models else "Unknown"
+            model_id = db.upsert_model(model_name, "H")
+            ctype = "video" if m.direct_url.endswith(".mp4") else "photo"
+            gallery_id = db.upsert_gallery(
+                model_id, ref.get("title") or ref["url"], m.file_page_url, "H", ctype)
+            db.record_download(gallery_id, m.file_page_url, m.filename)
+    if new_only:
+        db.update_crawl_checkpoint(
+            "H", datetime.datetime.now(datetime.timezone.utc).isoformat())
+
+
 def run_crawl(url: str, pages: int = 1, limit: int = 0, extract_only: bool = False,
               output: Optional[str] = None, json_output: bool = False,
               config: Optional[AppConfig] = None):
@@ -611,16 +672,29 @@ def run_crawl(url: str, pages: int = 1, limit: int = 0, extract_only: bool = Fal
 
 @app.command()
 def crawl(
-    url: str = typer.Argument(..., help="Category or Tag list URL"),
+    url: Optional[str] = typer.Argument(None, help="Category or Tag list URL"),
     pages: int = typer.Option(1, "--pages", help="Max pages to crawl (0 for all)"),
     limit: int = typer.Option(0, "--limit", help="Max posts to process (0 for all)"),
     extract_only: bool = typer.Option(False, "--extract-only", help="Extract direct URL without dispatching to aria2"),
     output: Optional[str] = typer.Option(None, "-o", "--output", help="Save extracted URLs to file"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON format"),
+    skip_gofile: bool = typer.Option(False, "--skip-gofile", help="Skip Gofile links (e.g. quota exceeded)"),
+    site: Optional[str] = typer.Option(None, "--site", help="사이트 명시 선택 (hegre)"),
+    model: Optional[str] = typer.Option(None, "--model", help="모델 전체 크롤 (hegre)"),
+    new: bool = typer.Option(False, "--new", help="신작 크롤 (체크포인트 기반)"),
 ):
     """Crawl category or tag listing across multiple pages and process all posts."""
+    if site == "hegre" or (url and "hegre.com" in url):
+        return run_hegre_crawl(url=url, model=model, new_only=new,
+                               extract_only=extract_only, limit=limit)
+    if not url:
+        console.print("[red]URL이 필요하다 (--site hegre 제외)[/red]")
+        raise typer.Exit(1)
+    cfg = load_config()
+    if skip_gofile:
+        cfg.skip_gofile = True
     run_crawl(url, pages=pages, limit=limit, extract_only=extract_only,
-              output=output, json_output=json_output)
+              output=output, json_output=json_output, config=cfg)
 
 
 @app.command()

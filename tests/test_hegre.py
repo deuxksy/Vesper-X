@@ -134,3 +134,80 @@ def test_ensure_credentials_present():
     cfg = AppConfig(credentials={"hegre": CredentialConfig("u", "p")})
     creds = HegreCrawler(cfg).ensure_credentials()
     assert creds.username == "u"
+
+
+# --- CLI 통합 (Task 5) ---
+
+import typer
+from vesper_x.cli import run_hegre_crawl
+from vesper_x.premium_db import PremiumDB
+
+
+class FakeCrawler:
+    """fetch/resolve_content를 HTML 응답으로 대체하는 테스트 더블."""
+
+    def __init__(self, pages: dict[str, str]):
+        self.pages = pages
+        self.parser = HegreParser()
+
+    def ensure_credentials(self):
+        return CredentialConfig("u", "p")
+
+    async def fetch(self, url: str) -> str:
+        if url not in self.pages:
+            raise RuntimeError(f"unexpected fetch: {url}")
+        return self.pages[url]
+
+    def resolve_content(self, html: str, page_url: str):
+        return HegreCrawler.resolve_content(self, html, page_url)
+
+
+def _cfg():
+    return AppConfig(credentials={"hegre": CredentialConfig("u", "p")})
+
+
+def test_run_hegre_crawl_dispatches_and_records(tmp_path):
+    db = PremiumDB(tmp_path / "premium.db")
+    crawler = FakeCrawler({
+        "https://hegre.com/films/massage-x": VIDEO_PAGE,
+    })
+    run_hegre_crawl(url="https://hegre.com/films/massage-x", model=None,
+                    new_only=False, extract_only=True, limit=0,
+                    config=_cfg(), db=db, crawler=crawler)
+    assert db.is_downloaded("https://hegre.com/films/massage-x")
+
+
+def test_run_hegre_crawl_skips_dispatched(tmp_path):
+    db = PremiumDB(tmp_path / "premium.db")
+    db.record_download(None, "https://hegre.com/films/massage-x")
+    crawler = FakeCrawler({})  # fetch되면 안 된다 — skip이 먼저다
+    run_hegre_crawl(url="https://hegre.com/films/massage-x", model=None,
+                    new_only=False, extract_only=True, limit=0,
+                    config=_cfg(), db=db, crawler=crawler)
+
+
+def test_run_hegre_crawl_no_links_continues(tmp_path):
+    db = PremiumDB(tmp_path / "premium.db")
+    crawler = FakeCrawler({"https://hegre.com/films/empty": EMPTY_PAGE})
+    run_hegre_crawl(url="https://hegre.com/films/empty", model=None,
+                    new_only=False, extract_only=True, limit=0,
+                    config=_cfg(), db=db, crawler=crawler)
+    assert not db.is_downloaded("https://hegre.com/films/empty")
+
+
+def test_run_hegre_crawl_updates_checkpoint_for_new(tmp_path):
+    db = PremiumDB(tmp_path / "premium.db")
+    crawler = FakeCrawler({"https://hegre.com/films/massage-x": VIDEO_PAGE})
+    run_hegre_crawl(url="https://hegre.com/films/massage-x", model=None,
+                    new_only=True, extract_only=True, limit=0,
+                    config=_cfg(), db=db, crawler=crawler)
+    assert db.get_crawl_checkpoint("H") is not None
+
+
+def test_run_hegre_crawl_no_credentials_exits(tmp_path):
+    db = PremiumDB(tmp_path / "premium.db")
+    crawler = FakeCrawler({})
+    with pytest.raises(typer.Exit):
+        run_hegre_crawl(url="https://hegre.com/films/x", model=None,
+                        new_only=False, extract_only=True, limit=0,
+                        config=AppConfig(), db=db, crawler=crawler)

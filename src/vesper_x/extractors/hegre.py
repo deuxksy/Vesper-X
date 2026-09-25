@@ -149,6 +149,21 @@ class HegreCrawler:
 
     # --- Playwright 세션 (골격 — selector는 Task 6 실측에서 확정) ---
 
+    async def collect(self, model_slug: Optional[str] = None,
+                      max_pages: int = 10) -> list[dict]:
+        """모델/신작 목록 순회 — fetch·selector는 Task 6 실측에서 확정."""
+        base = (URLS["model"].format(slug=model_slug) if model_slug
+                else URLS["updates"])
+        refs: list[dict] = []
+        url: Optional[str] = base
+        for _ in range(max_pages):
+            html = await self.fetch(url)
+            refs.extend(self.extract_gallery_refs(html, url))
+            url = self.extract_next_page_url(html, url)
+            if not url:
+                break
+        return refs
+
     def _launch_kwargs(self) -> dict:
         kwargs: dict = {"channel": "chrome", "headless": False}
         if self.config.proxy:
