@@ -37,7 +37,7 @@ def test_load_config_sites_defaults_when_section_absent(tmp_path, monkeypatch):
 
 def test_app_config_has_builtin_default_sites():
     cfg = AppConfig()
-    assert set(cfg.sites) == {"misskon.com", "cosplaytele.com"}
+    assert set(cfg.sites) == {"misskon.com", "cosplaytele.com", "hegre.com"}
 
 
 def test_crawl_crawler_selection_driven_by_sites_config():
