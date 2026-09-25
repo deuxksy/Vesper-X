@@ -4,31 +4,30 @@ from vesper_x.extractors.hegre import HegreParser, HegreCrawler
 
 VIDEO_PAGE = """
 <html><body>
-<div class="download">
-  <a href="https://cdn.hegre.com/vid/1080.mp4">Full HD 1080p</a>
-  <a href="https://cdn.hegre.com/vid/2160.mp4">4K Ultra HD 2160p</a>
-  <a href="https://cdn.hegre.com/vid/720.mp4">HD 720p</a>
-</div>
-<a class="model" href="/models/charlie-atropos">Charlie Atropos</a>
+<a href="https://content.hegre.com/films/ani-cyprus-holiday/ani-cyprus-holiday-2160p.mp4?d=attachment&amp;v=1642515443" class="members-only"></a>
+<a href="https://content.hegre.com/films/ani-cyprus-holiday/ani-cyprus-holiday-1080p.mp4?d=attachment&amp;v=1642515443" class="members-only"></a>
+<a href="https://pp.hegre.com/films/ani-cyprus-holiday/ani-cyprus-holiday-trailer-2160p.mp4?v=1642498695"></a>
+<a href="/models/ani" class="record-model" title="Ani"></a>
 </body></html>
 """
 
 VIDEO_PAGE_NO_4K = """
-<html><body><div class="download">
-  <a href="https://cdn.hegre.com/vid/1080.mp4">Full HD 1080p</a>
-</div></body></html>
+<html><body>
+<a href="https://content.hegre.com/films/x/x-1080p.mp4?d=attachment&amp;v=1" class="members-only"></a>
+</body></html>
 """
 
 GALLERY_PAGE = """
 <html><body>
-<a href="https://cdn.hegre.com/zip/standard.zip">Standard Size Edition | 4000px</a>
-<a href="https://cdn.hegre.com/zip/large.zip">Large Size Edition | 6000px</a>
+<a href="https://cc.hegre.com/galleries/adriana-ample-attributes/zips/adriana-ample-attributes-10000px.zip?v=1485180972" class="members-only"></a>
+<a href="https://cc.hegre.com/galleries/adriana-ample-attributes/zips/adriana-ample-attributes-6000px.zip?v=1485180972" class="members-only"></a>
+<a href="https://cc.hegre.com/galleries/adriana-ample-attributes/zips/adriana-ample-attributes-1200px.zip?v=1485180972" class="members-only"></a>
 </body></html>
 """
 
 GALLERY_PAGE_SINGLE_ZIP = """
 <html><body>
-<a href="https://cdn.hegre.com/zip/only.zip">Standard Size Edition | 4000px</a>
+<a href="https://cc.hegre.com/galleries/x/zips/x-4000px.zip?v=1" class="members-only"></a>
 </body></html>
 """
 
@@ -37,7 +36,8 @@ EMPTY_PAGE = "<html><body><p>login required</p></body></html>"
 
 def test_best_video_prefers_4k():
     best = HegreParser().best_video(VIDEO_PAGE)
-    assert best == {"url": "https://cdn.hegre.com/vid/2160.mp4", "resolution": 2160}
+    assert best == {"url": "https://content.hegre.com/films/ani-cyprus-holiday/ani-cyprus-holiday-2160p.mp4?d=attachment&v=1642515443",
+                    "resolution": 2160}
 
 
 def test_best_video_falls_back_without_4k():
@@ -50,8 +50,10 @@ def test_best_video_empty_page():
 
 
 def test_best_zip_prefers_6000px():
+    """10000px가 있어도 6000px 우선 (spec 3.2) — 6000 없으면 최대 fallback."""
     best = HegreParser().best_zip(GALLERY_PAGE)
-    assert best == {"url": "https://cdn.hegre.com/zip/large.zip", "pixels": 6000}
+    assert best == {"url": "https://cc.hegre.com/galleries/adriana-ample-attributes/zips/adriana-ample-attributes-6000px.zip?v=1485180972",
+                    "pixels": 6000}
 
 
 def test_best_zip_single_option():
@@ -61,11 +63,11 @@ def test_best_zip_single_option():
 
 def test_content_type_from_url():
     assert HegreParser.content_type("https://hegre.com/films/massage-x") == "video"
-    assert HegreParser.content_type("https://hegre.com/galleries/serenity") == "photo"
+    assert HegreParser.content_type("https://hegre.com/photos/serenity") == "photo"
 
 
 def test_extract_model_name():
-    assert HegreParser.extract_model_name(VIDEO_PAGE) == "Charlie Atropos"
+    assert HegreParser.extract_model_name(VIDEO_PAGE) == "Ani"
     assert HegreParser.extract_model_name(EMPTY_PAGE) is None
 
 
@@ -76,7 +78,7 @@ from vesper_x.config import AppConfig, CredentialConfig
 INDEX_PAGE = """
 <html><body>
   <a href="/films/massage-x">Massage X</a>
-  <a href="/galleries/serenity">Serenity</a>
+  <a href="/photos/serenity">Serenity</a>
   <a href="/models/charlie-atropos">Charlie Atropos</a>
   <a href="/join">Join</a>
   <a class="next" href="/update?page=2">Next</a>
@@ -92,7 +94,7 @@ def test_extract_gallery_refs_filters_content_links():
     refs = HegreCrawler.extract_gallery_refs(INDEX_PAGE, "https://hegre.com/update")
     urls = [r["url"] for r in refs]
     assert "https://hegre.com/films/massage-x" in urls
-    assert "https://hegre.com/galleries/serenity" in urls
+    assert "https://hegre.com/photos/serenity" in urls
     assert all("/models/" not in u and "/join" not in u for u in urls)
 
 
@@ -107,19 +109,19 @@ def test_resolve_content_video():
     results = crawler.resolve_content(VIDEO_PAGE, "https://hegre.com/films/massage-x")
     assert len(results) == 1
     m = results[0]
-    assert m.direct_url == "https://cdn.hegre.com/vid/2160.mp4"
-    assert m.filename == "Charlie Atropos/massage-x/2160.mp4"
+    assert m.direct_url == "https://content.hegre.com/films/ani-cyprus-holiday/ani-cyprus-holiday-2160p.mp4?d=attachment&v=1642515443"
+    assert m.filename == "Ani/massage-x/ani-cyprus-holiday-2160p.mp4"
     assert m.source_page == "https://hegre.com/films/massage-x"
     assert m.file_page_url == "https://hegre.com/films/massage-x"
-    assert m.models == ["Charlie Atropos"]
+    assert m.models == ["Ani"]
 
 
 def test_resolve_content_photo_zip():
     crawler = _crawler()
-    results = crawler.resolve_content(GALLERY_PAGE, "https://hegre.com/galleries/serenity")
-    assert results[0].direct_url == "https://cdn.hegre.com/zip/large.zip"
+    results = crawler.resolve_content(GALLERY_PAGE, "https://hegre.com/photos/serenity")
+    assert results[0].direct_url == "https://cc.hegre.com/galleries/adriana-ample-attributes/zips/adriana-ample-attributes-6000px.zip?v=1485180972"
     # GALLERY_PAGE에는 모델 링크가 없다 - Unknown 폴백
-    assert results[0].filename == "Unknown/serenity/large.zip"
+    assert results[0].filename == "Unknown/serenity/adriana-ample-attributes-6000px.zip"
 
 
 def test_resolve_content_empty_page():
@@ -129,6 +131,14 @@ def test_resolve_content_empty_page():
 def test_ensure_credentials_missing_raises():
     with pytest.raises(ValueError, match="credentials.hegre"):
         _crawler().ensure_credentials()
+
+
+def test_resolve_content_passes_session_cookie():
+    """fetch에서 캐시한 login 쿠키가 CDN 인증용으로 metadata에 실린다."""
+    crawler = _crawler()
+    crawler._session_cookie = "login=abc123"
+    m = crawler.resolve_content(VIDEO_PAGE, "https://hegre.com/films/massage-x")[0]
+    assert m.cookies == "login=abc123"
 
 
 def test_ensure_credentials_present():
@@ -151,6 +161,7 @@ class FakeCrawler:
         self.pages = pages
         self.refs = refs or []
         self.parser = HegreParser()
+        self._session_cookie = None
 
     def ensure_credentials(self):
         return CredentialConfig("u", "p")
@@ -285,11 +296,5 @@ def test_resolve_content_filename_includes_model_album():
     """spec 4.1: H/{모델명}/{앨범 제목}/ 계층 — filename에 상대경로 포함."""
     crawler = _crawler()
     results = crawler.resolve_content(VIDEO_PAGE, "https://hegre.com/films/massage-x")
-    assert results[0].filename == "Charlie Atropos/massage-x/2160.mp4"
+    assert results[0].filename == "Ani/massage-x/ani-cyprus-holiday-2160p.mp4"
 
-
-def test_hegre_crawler_fetch_not_implemented_before_task6():
-    import asyncio
-    crawler = _crawler()
-    with pytest.raises(NotImplementedError):
-        asyncio.run(crawler.fetch("https://hegre.com/films/x"))

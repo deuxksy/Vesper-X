@@ -26,3 +26,4 @@ downloads/
 
 # 모델 등급/국적 백업 (build가 자동 관리)
 data/.model_prefs_backup.json
+account.txt

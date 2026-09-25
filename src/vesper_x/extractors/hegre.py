@@ -14,18 +14,27 @@ from vesper_x.config import AppConfig, CredentialConfig
 from vesper_x.models import DownloadMetadata
 
 URLS = {
-    "model": "https://hegre.com/models/{slug}",   # 가정 — Task 6 확정
-    "updates": "https://hegre.com/update",        # 가정 — Task 6 확정
-    # 콘텐츠 경로 패턴(가정 — Task 6 확정): 목록에서 films/galleries 링크 식별용
-    "content_path": r"/(films?|galleries?|magazines?)/[\w-]+",
+    "home": "https://www.hegre.com",              # 실측 2026-09-25
+    "login": "https://www.hegre.com/login",       # 실측 2026-09-25 (form POST, CSRF)
+    "model": "https://www.hegre.com/models/{slug}",   # 실측 2026-09-25
+    "updates": "https://www.hegre.com",           # 신작: 홈페이지가 최신 films 노출
+    # 콘텐츠 경로 패턴 (실측 2026-09-25): films=video, photos=photo.
+    # collections(중복 큐레이션)/news/sexed는 제외
+    "content_path": r"/(films?|photos?)/[\w-]+",
 }
 
 SELECTORS = {
-    "download_links": "div.download a[href]",     # 가정 — Task 6 확정
-    "gallery_zip": "a[href$='.zip']",             # 가정 — Task 6 확정
-    "model_name": "a.model",                      # 가정 — Task 6 확정
-    "next_page": "a.next, li.pagination-next a, a[rel='next']",  # 가정 — Task 6 확정
+    "download_links": "a[href*='.mp4']",          # 실측: content.hegre.com 정본/pp.hegre.com trailer
+    "gallery_zip": "a[href*='.zip']",             # 실측: cc.hegre.com zip (?v= 쿼리 때문에 $= 불가)
+    "model_name": "a.record-model",               # 실측: 모델명은 title 속성에 있음
+    "next_page": "a.next, li.pagination-next a, a[rel='next']",
+    "login_user": "#username",                    # 실측 2026-09-25
+    "login_pass": "#password",                    # 실측 2026-09-25
+    "login_submit": "input.submit.not-on-phone",  # 실측 2026-09-25
 }
+
+# trailer(공개)와 정본(인증) 구분: 정본 CDN host (실측 2026-09-25)
+CDN_HOSTS = {"content.hegre.com", "cc.hegre.com"}
 
 _RESOLUTION_RE = re.compile(r"(\d{3,4})\s*p", re.IGNORECASE)
 _PIXELS_RE = re.compile(r"(\d{4,5})\s*px", re.IGNORECASE)
@@ -34,20 +43,29 @@ _PIXELS_RE = re.compile(r"(\d{4,5})\s*px", re.IGNORECASE)
 class HegreParser:
     @staticmethod
     def content_type(url: str) -> str:
-        """/films|/movies → 'video', 그 외(/galleries|/magazines) → 'photo'."""
-        if re.search(r"/(films?|movies?|videos?)/", urlparse(url).path):
+        """/films → 'video', /photos(그 외) → 'photo' (실측 2026-09-25)."""
+        if re.search(r"/films?/", urlparse(url).path):
             return "video"
         return "photo"
 
     def video_links(self, html: str) -> list[dict]:
-        """해상도 내림차순 mp4 목록 — 동일 해상도 중복은 제거."""
+        """해상도 내림차순 정본 mp4 목록 — trailer(pp.hegre.com) 제외, 중복 제거.
+
+        실측 2026-09-25: 정본 href는 .../films/<slug>/<slug>-<res>p.mp4?d=attachment&v=<ts>.
+        라벨에 해상도가 없어도 파일명에서 <res>p를 추출한다.
+        """
         soup = BeautifulSoup(html, "html.parser")
         links: list[dict] = []
         for a in soup.select(SELECTORS["download_links"]):
-            label = a.get_text(" ", strip=True) or a.get("data-resolution", "")
-            m = _RESOLUTION_RE.search(label)
-            if m and a["href"].endswith(".mp4"):
-                links.append({"url": a["href"], "resolution": int(m.group(1))})
+            href = a["href"]
+            host = urlparse(href).hostname or ""
+            path = href.split("?")[0]
+            if host not in CDN_HOSTS or not path.endswith(".mp4"):
+                continue
+            label = a.get_text(" ", strip=True)
+            m = _RESOLUTION_RE.search(label) or _RESOLUTION_RE.search(path)
+            if m:
+                links.append({"url": href, "resolution": int(m.group(1))})
         links.sort(key=lambda x: -x["resolution"])
         seen, out = set(), []
         for link in links:
@@ -61,26 +79,42 @@ class HegreParser:
         return links[0] if links else None
 
     def zip_links(self, html: str) -> list[dict]:
-        """픽셀 내림차순 ZIP 목록 — 6000px 우선, 소팅이 곧 fallback이다."""
+        """픽셀 내림차순 ZIP 목록 — 최대 px가 곧 선택 기준이자 fallback.
+
+        실측 2026-09-25: photo 갤러리는 cc.hegre.com/galleries/<slug>/zips/<slug>-<px>px.zip
+        (10000/6000/3000/1200px 4종, 앵커 라벨 없음 — 파일명에서 px 추출).
+        """
         soup = BeautifulSoup(html, "html.parser")
         links: list[dict] = []
         for a in soup.select(SELECTORS["gallery_zip"]):
-            label = a.get_text(" ", strip=True) or a.get("data-size", "")
-            m = _PIXELS_RE.search(label)
+            href = a["href"]
+            host = urlparse(href).hostname or ""
+            if host not in CDN_HOSTS:
+                continue
+            m = _PIXELS_RE.search(a.get_text(" ", strip=True)) or _PIXELS_RE.search(href)
             if m:
-                links.append({"url": a["href"], "pixels": int(m.group(1))})
+                links.append({"url": href, "pixels": int(m.group(1))})
         links.sort(key=lambda x: -x["pixels"])
         return links
 
     def best_zip(self, html: str) -> Optional[dict]:
+        """6000px 우선 (spec 3.2) — 없으면 가용 최대 px fallback."""
         links = self.zip_links(html)
-        return links[0] if links else None
+        if not links:
+            return None
+        for link in links:
+            if link["pixels"] == 6000:
+                return link
+        return links[0]
 
     @staticmethod
     def extract_model_name(html: str) -> Optional[str]:
         soup = BeautifulSoup(html, "html.parser")
         a = soup.select_one(SELECTORS["model_name"])
-        return a.get_text(" ", strip=True) if a else None
+        if not a:
+            return None
+        # 실측: <a class="record-model" title="Ani"> — 텍스트 노드가 없어 title 우선
+        return a.get("title") or a.get_text(" ", strip=True) or None
 
 
 HEGRE_PROFILE_DIR = Path.home() / ".config" / "url-resolver" / "hegre_profile"
@@ -102,6 +136,9 @@ class HegreCrawler:
     def __init__(self, config: AppConfig):
         self.config = config
         self.parser = HegreParser()
+        # fetch마다 persistent profile에서 갱신 - CDN 다운로드 인증용 (실측 2026-09-25:
+        # login 쿠키만으로 content/cc.hegre.com 200, Referer/IP 바인딩 없음)
+        self._session_cookie: Optional[str] = None
 
     def ensure_credentials(self) -> CredentialConfig:
         creds = self.config.credentials.get("hegre")
@@ -153,6 +190,7 @@ class HegreCrawler:
             source_page=page_url,
             models=[model_name] if model_name else [],
             file_page_url=page_url,
+            cookies=self._session_cookie,
         )]
 
     # --- Playwright 세션 (골격 — selector는 Task 6 실측에서 확정) ---
@@ -173,8 +211,44 @@ class HegreCrawler:
         return refs
 
     async def fetch(self, url: str) -> str:
-        """persistent Chrome 세션 fetch — Task 6 실측에서 구현한다."""
-        raise NotImplementedError("HegreCrawler.fetch는 Task 6 실측 후 구현")
+        """persistent Chrome 세션으로 페이지 HTML 반환 (매 launch, ouo 패턴)."""
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            HEGRE_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+            context = await p.chromium.launch_persistent_context(
+                str(HEGRE_PROFILE_DIR), **self._launch_kwargs())
+            try:
+                page = context.pages[0] if context.pages else await context.new_page()
+                await page.goto(url, wait_until="domcontentloaded")
+                content = await page.content()
+                # CDN 인증 쿠키 캐시 - aria2 Cookie 헤더로 전달된다
+                for c in await context.cookies():
+                    if c["name"] == "login" and c.get("value"):
+                        self._session_cookie = f"login={c['value']}"
+                        break
+                return content
+            finally:
+                await context.close()
+
+    async def login(self) -> bool:
+        """hegre.com 로그인 → persistent profile에 세션 저장. 성공 여부 반환."""
+        from playwright.async_api import async_playwright
+        creds = self.ensure_credentials()
+        async with async_playwright() as p:
+            HEGRE_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+            context = await p.chromium.launch_persistent_context(
+                str(HEGRE_PROFILE_DIR), **self._launch_kwargs())
+            try:
+                page = context.pages[0] if context.pages else await context.new_page()
+                await page.goto(URLS["login"], wait_until="domcontentloaded")
+                await page.fill(SELECTORS["login_user"], creds.username)
+                await page.fill(SELECTORS["login_pass"], creds.password)
+                await page.click(SELECTORS["login_submit"])
+                await page.wait_for_load_state("networkidle")
+                # 로그인 실패 시 /login에 재머물거나 에러 박스가 뜬다
+                return "login" not in page.url
+            finally:
+                await context.close()
 
     def _launch_kwargs(self) -> dict:
         kwargs: dict = {"channel": "chrome", "headless": False}
