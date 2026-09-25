@@ -5,9 +5,13 @@ Task 6 실접속 recon에서 상수만 갱신한다 (파싱 로직과 분리).
 CDN 직링크는 dispatch 직전에만 resolve한다 (spec 4.3 — 서명 TTL/IP 바인딩 방어).
 """
 import re
+from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
+
+from vesper_x.config import AppConfig, CredentialConfig
+from vesper_x.models import DownloadMetadata
 
 URLS = {
     "model": "https://hegre.com/models/{slug}",   # 가정 — Task 6 확정
@@ -74,3 +78,79 @@ class HegreParser:
         soup = BeautifulSoup(html, "html.parser")
         a = soup.select_one(SELECTORS["model_name"])
         return a.get_text(" ", strip=True) if a else None
+
+
+HEGRE_PROFILE_DIR = Path.home() / ".config" / "url-resolver" / "hegre_profile"
+DEFAULT_USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/128.0.0.0 Safari/537.36")
+
+_CONTENT_PATH_RE = re.compile(r"/(films?|galleries?|magazines?)/[\w-]+")
+
+
+class HegreCrawler:
+    """인증 세션(persistent Chrome profile) + 목록 수집.
+
+    세션은 ouo와 동일한 launch_persistent_context 패턴이다 — 프로필 디렉토리에
+    로그인 쿠키가 유지되어 storage_state 파일 관리가 불필요하다.
+    login/fetch의 Playwright 구현은 Task 6 실측에서 selector와 함께 완성한다.
+    """
+
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.parser = HegreParser()
+
+    def ensure_credentials(self) -> CredentialConfig:
+        creds = self.config.credentials.get("hegre")
+        if not creds or not creds.username:
+            raise ValueError(
+                "config.toml [credentials.hegre] 미설정 - username/password를 추가한다")
+        return creds
+
+    # --- 목록 수집 (정적 — mock 테스트 대상) ---
+
+    @staticmethod
+    def extract_gallery_refs(html: str, base_url: str) -> list[dict]:
+        soup = BeautifulSoup(html, "html.parser")
+        refs: list[dict] = []
+        seen: set[str] = set()
+        for a in soup.select("a[href]"):
+            href = urljoin(base_url, a["href"])
+            if _CONTENT_PATH_RE.search(urlparse(href).path) and href not in seen:
+                seen.add(href)
+                refs.append({"url": href, "title": a.get_text(" ", strip=True)})
+        return refs
+
+    @staticmethod
+    def extract_next_page_url(html: str, base_url: str) -> Optional[str]:
+        soup = BeautifulSoup(html, "html.parser")
+        a = soup.select_one("a.next, li.pagination-next a, a[rel='next']")
+        return urljoin(base_url, a["href"]) if a and a.get("href") else None
+
+    # --- resolve (dispatch 직전 호출 — spec 4.3) ---
+
+    def resolve_content(self, html: str, page_url: str) -> list[DownloadMetadata]:
+        ctype = self.parser.content_type(page_url)
+        model_name = self.parser.extract_model_name(html)
+        best = (self.parser.best_video(html) if ctype == "video"
+                else self.parser.best_zip(html))
+        if not best:
+            return []
+        direct_url = best["url"]
+        return [DownloadMetadata(
+            direct_url=direct_url,
+            referer=page_url,
+            user_agent=DEFAULT_USER_AGENT,
+            filename=direct_url.split("?")[0].rsplit("/", 1)[-1],
+            source_page=page_url,
+            models=[model_name] if model_name else [],
+            file_page_url=page_url,
+        )]
+
+    # --- Playwright 세션 (골격 — selector는 Task 6 실측에서 확정) ---
+
+    def _launch_kwargs(self) -> dict:
+        kwargs: dict = {"channel": "chrome", "headless": False}
+        if self.config.proxy:
+            kwargs["proxy"] = {"server": self.config.proxy}
+        return kwargs
