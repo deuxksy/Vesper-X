@@ -6,7 +6,7 @@
 ## 목표
 
 - Hegre 프리미엄 계정으로 영상(4K 2160p)과 이미지(6000px ZIP) 다운로드
-- 기존 Vesper-X 파이프라인(aria2 dispatch, dispatch_log)에 통합
+- 기존 Vesper-X 파이프라인(aria2 dispatch)에 통합
 - 모델/갤러리 메타데이터와 다운로드 이력을 SQLite DB로 관리
 
 ## 스코프
@@ -14,8 +14,9 @@
 **포함:**
 
 - H(Hegre) 크롤러 구현
+- models.db → cosplay.db 리네임 (선결 작업 — mechanical 치환, 별도 커밋)
 - Config 2중 분리 (default.toml + 로컬 config.toml)
-- SQLite DB 스키마 및 기본 CRUD
+- premium.db 스키마 및 기본 CRUD
 - aria2 dispatch 연동
 
 **제외:**
@@ -37,6 +38,10 @@
 ### 1.1 고정 설정: `config/default.toml` (git 추적)
 
 사이트 매핑, 기본값 등 환경에 무관한 고정 변수.
+
+탐색은 `models_db.py`의 `DEFAULT_DB_PATH`와 동일한 관행을 따른다 —
+`Path(__file__).parent.parent.parent / "config" / "default.toml"`
+(uv editable 설치 전제. 별도 패키징 메커니즘 없음).
 
 ```toml
 [aria2]
@@ -156,18 +161,39 @@ src/vesper_x/extractors/hegre.py
 - 인증 쿠키가 필요한 경우 aria2 `--header "Cookie: ..."` 옵션 전달
 - Referer 헤더 필요 시 함께 전달
 
-### 4.3 dispatch_log
+### 4.3 resolve 시점 — dispatch 직전
 
-- 기존 dispatch_log 메커니즘으로 이미 전송한 URL skip
-- 향후 SQLite DB의 `downloads` 테이블로 통합 예정 (이번에는 병행)
+Hegre CDN URL은 인증 세션에서 발급되므로 서명 TTL / IP 바인딩 가능성이 있다
+(mediafire IP 바인딩 사례 참조. 실측 전까지 Unverified).
+따라서 크롤 단계는 갤러리 URL만 수집하고, CDN 직링크 resolve는
+aria2 dispatch 직전에 수행한다 (gofile 순차 처리 패턴과 동일 사상).
+실측에서 TTL 없음이 확인되면 일괄 resolve로 완화할 여지를 남긴다.
+
+### 4.4 dispatch_log — 부류 분담
+
+- Hegre 크롤의 skip 판정은 premium.db `downloads` 테이블이 단일 소스
+- 기존 `cosplay.db`(구 models.db)의 dispatch_log는 misskon/cosplaytele 전용으로 유지 —
+  Hegre 파이프라인은 이를 참조하지 않는다
+- 사이트 도메인이 달라 URL 키 충돌이 없으므로 분담이 안전하다
+- 무료/프리미엄 이력의 통합은 Phase 6(DB Sync)에서 별도로 다룬다
 
 ## 5. SQLite DB
 
-### 5.1 위치
+### 5.1 위치와 부류 분담
 
 ```
-~/.config/url-resolver/vesper.db
+~/.config/url-resolver/premium.db
 ```
+
+무료 부류 DB(`cosplay.db` = 구 models.db)와 부류를 분담한다:
+
+| DB | 위치 | 부류 | 용도 |
+| :--- | :--- | :--- | :--- |
+| `cosplay.db` (구 models.db) | `data/` (gitignore 재생산물) | 무료 아카이브 | 모델 사전 + dispatch_log — misskon/cosplaytele 전용 |
+| `premium.db` (신규) | `~/.config/url-resolver/` | 프리미엄 | models/galleries/downloads/crawl_state — H/W4B 전용 |
+
+선결 작업: `models.db` → `cosplay.db` 리네임 (`DEFAULT_DB_PATH`,
+`build_models_db.py` 출력, 문서 일괄 치환 — Hegre 구현 전 별도 커밋).
 
 ### 5.2 스키마
 
@@ -216,7 +242,9 @@ CREATE TABLE crawl_state (
 
 ### 5.3 DB 모듈
 
-`src/vesper_x/db.py` 신규:
+`src/vesper_x/premium_db.py` 신규 (모듈명도 부류를 나타낸다).
+기존 `models_db.py`(ModelRegistry)의 검증 패턴을 따른다 — 비활성 폴백,
+테이블 자동 생성·마이그레이션, sqlite3 직접 사용, skip/이력 API 시그니처 체계.
 
 - `init_db()` — 테이블 생성 (IF NOT EXISTS)
 - `upsert_model()`, `upsert_gallery()`, `record_download()` 등 기본 CRUD
@@ -251,18 +279,27 @@ DB 동기화는 ROADMAP.md에 별도 관리. 이번에는 로컬 SQLite만 구�
 - 프록시(brla gluetun) 경유 필수 — 기존 `[network] proxy` 설정 재사용
 - 세션 만료/차단 시 재로그인 + 적절한 딜레이로 rate limit 준수
 - aria2에 쿠키/헤더 전달 가능 여부는 구현 시 검증 필요
+- CDN 직링크 수명(서명 TTL/IP 바인딩)은 실측 전까지 Unverified — 4.3의
+  dispatch 직전 resolve 설계로 방어하며, 실측 후 일괄 resolve 완화 여부 결정
 - 테스트는 mock 기반 (기존 패턴 준수, 실 network 호출 없음)
 
 ## 8. 영향 범위
 
-| 파일                                  | 변경                                           |
-| ------------------------------------- | ---------------------------------------------- |
+| 파일 | 변경 |
+| :--- | :--- |
+| `src/vesper_x/models_db.py`          | 수정 — `DEFAULT_DB_PATH` cosplay.db 리네임 (선결) |
+| `scripts/build_models_db.py`         | 수정 — 출력 파일명 cosplay.db (선결)          |
 | `config/default.toml`               | 신규 — git 추적 고정 설정                     |
 | `src/vesper_x/config.py`            | 수정 — 2중 config 로딩, CredentialConfig 추가 |
 | `src/vesper_x/extractors/hegre.py`  | 신규 — HegreCrawler + HegreParser             |
-| `src/vesper_x/db.py`                | 신규 — SQLite DB 스키마 + CRUD                |
+| `src/vesper_x/premium_db.py`        | 신규 — premium.db 스키마 + CRUD               |
 | `src/vesper_x/cli.py`               | 수정 — hegre 크롤러 등록, --model/--new 옵션  |
 | `src/vesper_x/dispatchers/aria2.py` | 수정 — 쿠키/헤더 전달 지원 (필요 시)          |
 | `tests/test_hegre.py`               | 신규 — mock 기반 테스트                       |
 | `tests/test_config_merge.py`        | 신규 — 2중 config merge 테스트                |
-| `tests/test_db.py`                  | 신규 — DB CRUD 테스트                         |
+| `tests/test_premium_db.py`          | 신규 — DB CRUD 테스트                         |
+
+**선결 커밋 (Hegre 구현 전):** models.db → cosplay.db 리네임.
+`models_db.py` 경로 상수, `build_models_db.py` 출력 파일명, RULES/CLAUDE 문서,
+기존 테스트의 DB 파일명 참조를 일괄 치환한다. 로컬 기존 `data/models.db`는
+`data/cosplay.db`로 파일 이동 (dispatch_log 이력 보존).
