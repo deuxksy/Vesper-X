@@ -58,10 +58,10 @@
 ---
 
 ### 5. 🔑 프리미엄 사이트 크롤러 (Premium Site Crawlers)
-- [ ] **H (Hegre)**: Playwright 인증 세션 → 영상(4K 2160p) / 이미지(6000px ZIP) 추출 → aria2 dispatch
+- [x] **H (Hegre)**: Playwright 인증 세션 → 영상(4K 2160p) / 이미지(6000px ZIP) 추출 → aria2 dispatch — ✅ 2026-09-25 완료
 - [ ] **W4B (Watch4Beauty)**: H와 동일 패턴으로 추가
-- [ ] **Config 2중 분리**: `config/default.toml` (git 추적) + `~/.config/url-resolver/config.toml` (로컬)
-- [ ] **SQLite DB**: 모델 프로필, 갤러리 메타, 다운로드 이력, 크롤 상태 관리
+- [x] **Config 2중 분리**: `config/default.toml` (git 추적) + `~/.config/url-resolver/config.toml` (로컬)
+- [x] **SQLite DB**: 모델 프로필, 갤러리 메타, 다운로드 이력, 크롤 상태 관리
 
 ---
 
@@ -79,6 +79,6 @@
 | **Phase 2** | 스텔스 & 차단 회피 강화 | Playwright Stealth, DoH 다중화, Fast-Bypass 리소스 필터링 | ⏳ 대기 |
 | **Phase 3** | 단축링크 & 호스트 확장 | Shrinkme/Linkvertise 바이패스, Pixeldrain/Workupload 리졸버 추가 | ⏳ 대기 |
 | **Phase 4** | 안정성 & 프록시 고도화 | SOCKS5 프록시 풀 연동, 자동 재시도 및 실패 복구 파이프라인 | ⏳ 대기 |
-| **Phase 5** | 프리미엄 사이트 크롤러 | H(Hegre) / W4B(Watch4Beauty) 인증 크롤러, SQLite DB | 🚧 진행 |
+| **Phase 5** | 프리미엄 사이트 크롤러 | H(Hegre) 완료 / W4B(Watch4Beauty) 잔여 | 🚧 진행 |
 | **Phase 6** | DB 동기화 | Litestream → R2, 필요 시 Cloud SQLite(Turso) | ⏳ 대기 |
 

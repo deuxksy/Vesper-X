@@ -12,6 +12,8 @@
 - **Shortener Bypass**: 단축링크 및 광고 페이지 Playwright 기반 브라우저 자동 우회
 - **Direct Link Extraction**: 파일 호스트(MediaFire, Gofile 등) 직링크 자동 변환
 - **Aria2 Dispatch**: aria2 RPC 데몬 연동 백그라운드 고속 전송
+- **수집/다운로드 2-Phase**: `crawl --collect`로 수집 후 `vesper dispatch`로 별도 전송 (mediafire 직전 재 resolve)
+- **프리미엄 사이트 크롤러**: Hegre 인증 세션으로 4K 영상/6000px ZIP 추출 (premium.db 이력)
 - **Model Registry**: cosplay.db 기반 모델명 통일·사이트별 보유/아카이브 현황 조회 (`vesper models`)
 
 ---
@@ -57,7 +59,19 @@ uv run vesper crawl "https://example-archive.com/category/model-name/" --pages 2
 uv run vesper clip
 ```
 
-### 4. 모델 조회 (사이트 보유량 + 내 아카이브 현황)
+### 4. 수집과 다운로드 분리 (2-Phase)
+```bash
+uv run vesper crawl "https://misskon.com/tag/<model>/" --collect   # 수집만
+uv run vesper dispatch                                             # 나중에 일괄 전송
+```
+
+### 5. 프리미엄 사이트 크롤링 (Hegre)
+```bash
+uv run vesper crawl --site hegre --new        # 신작 (체크포인트)
+uv run vesper crawl --site hegre --model ani  # 모델 전체
+```
+
+### 6. 모델 조회 (사이트 보유량 + 내 아카이브 현황)
 ```bash
 uv run vesper models zinieq
 ```
@@ -70,7 +84,7 @@ uv run vesper models zinieq
 | :--- | :--- | :--- |
 | **🚀 Tutorials (튜토리얼)** | [📦 설치 및 시작하기](#-설치) | 패키지 동기화 및 단축링크 우회 브라우저 초기 설정 |
 | **🛠️ How-To Guides (가이드)** | [💻 핵심 사용법](#-사용법) | 단일 파싱, 태그별 연속 크롤링, 클립보드 즉시 처리 절차 |
-| **📖 Reference (참고자료)** | [CLI 명령어 명세](#-사용법) | `vesper` CLI 서브커맨드(`parse`, `crawl`, `clip`) 규격 |
+| **📖 Reference (참고자료)** | [CLI 명령어 명세](#-사용법) | `vesper` CLI 서브커맨드(`parse`, `crawl`, `clip`, `dispatch`) 규격 |
 | **💡 Explanation (설명/원리)** | [🏗️ 아키텍처 및 파이프라인](#️-아키텍처-및-파이프라인)<br>[🗺️ ROADMAP.md](ROADMAP.md) | 프록시/Chrome 우회 파이프라인 동작 원리 및 중장기 확장 로드맵 |
 
 ---

@@ -12,17 +12,20 @@
 | 모델 조회 | `uv run vesper models <이름/slug>` — 사이트 실시간 카운트 + heritage 보유 + 크롤 추천 |
 | cosplay.db 재생성 | `uv run python scripts/build_models_db.py` — data/*.tsv에서 (패키지 import 때문에 uv run 필수) |
 | Browser 설치 | `uv run playwright install chromium` — gofile 캡처용 번들 Chromium (ouo/misskon은 실제 Chrome 사용) |
+| 수집/다운로드 분리 | `uv run vesper crawl <url> --collect` 후 `uv run vesper dispatch` — 2-phase (Gotchas 참조) |
 
 Lint 도구는 미설정. 도입 시 이 표를 갱신한다.
 
 ## Architecture
 
-- `src/vesper_x/cli.py` — Typer entry. parse / crawl / clip / batch / models
-- `src/vesper_x/extractors/` — Parser(misskon, cosplaytele) · Crawler(crawler) · Bypasser(ouo) · Resolver(mediafire, gofile)
+- `src/vesper_x/cli.py` — Typer entry. parse / crawl / clip / batch / models / dispatch
+- `src/vesper_x/extractors/` — Parser(misskon, cosplaytele, hegre) · Crawler(crawler) · Bypasser(ouo) · Resolver(mediafire, gofile)
+- `src/vesper_x/extractors/hegre.py` — `HegreCrawler`/`HegreParser` (프리미엄 인증 CDN, persistent Chrome profile)
+- `src/vesper_x/premium_db.py` — `PremiumDB`: 프리미엄 부류(H/W4B) 이력·체크포인트 (`~/.config/url-resolver/premium.db`)
 - `src/vesper_x/fetchers.py` — `BrowserFetcher` (Chrome ECH page fetch, `crawl`이 사용)
 - `src/vesper_x/dispatchers/aria2.py` — aria2p RPC 전송
 - `src/vesper_x/models.py` — `DownloadMetadata` 전송 단위
-- `src/vesper_x/config.py` — `~/.config/url-resolver/config.toml` 로드 (`[network] proxy`, `[sites]` 도메인→crawler/subdir 매핑)
+- `src/vesper_x/config.py` — `config/default.toml`(git 추적 고정설정) + `~/.config/url-resolver/config.toml`(로컬) deep merge (`[network] proxy`, `[sites]` 도메인→crawler/subdir 매핑, `[credentials]`)
 - `src/vesper_x/models_db.py` — `ModelRegistry`: data/cosplay.db 이름 사전(변형→캐노니컬/slug). DB 부재 시 조용히 비활성
 - `scripts/build_models_db.py` + `data/*.tsv` — 전수조사 스냅샷(TSV, git 추적)에서 cosplay.db 재생성(DB는 gitignore 재생산물)
 
