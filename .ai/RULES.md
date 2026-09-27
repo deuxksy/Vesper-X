@@ -21,6 +21,7 @@ Lint 도구는 미설정. 도입 시 이 표를 갱신한다.
 - `src/vesper_x/cli.py` — Typer entry. parse / crawl / clip / batch / models / dispatch
 - `src/vesper_x/extractors/` — Parser(misskon, cosplaytele, hegre) · Crawler(crawler) · Bypasser(ouo) · Resolver(mediafire, gofile)
 - `src/vesper_x/extractors/hegre.py` — `HegreCrawler`/`HegreParser` (프리미엄 인증 CDN, persistent Chrome profile)
+- `src/vesper_x/extractors/w4b.py` — `W4BCrawler`/`W4BParser` (Watch4Beauty 유료 구독, persistent Chrome profile, Download 클릭 후 패널 파싱)
 - `src/vesper_x/premium_db.py` — `PremiumDB`: 프리미엄 부류(H/W4B) 이력·체크포인트 + CDN 직링크 매핑(`downloads.direct_url`, dispatch 시 기록·aria2 역조회 backfill) (`~/.config/url-resolver/premium.db`)
 - `src/vesper_x/fetchers.py` — `BrowserFetcher` (Chrome ECH page fetch, `crawl`이 사용)
 - `src/vesper_x/dispatchers/aria2.py` — aria2p RPC 전송
@@ -67,3 +68,7 @@ Pipeline: CLI → BrowserFetcher(proxy+Chrome) → Crawler → Parser → Bypass
 - `data/cosplay.db`는 gitignore 재생산물(`uv run python scripts/build_models_db.py`로 생성) — 부재 시 `ModelRegistry`는 조용히 비활성이므로 신규 클론에서 metadata.models가 캐노니컬명이 아닌 사이트 표기로 기록되는 것은 정상 동작이다. 변형 매칭에서 `cosplayer` 등 일반명사 토큰은 제외(stopword)된다
 - **Hegre 모델 페이지는 본인 콘텐츠 섹션(`#films-wrapper`/`#galleries-wrapper` — 사진은 `#photos-wrapper`가 아니라 galleries다)와 사이트 신작이 한 페이지에 섞인다** — `collect`는 모델 모드에서 섹션 scoping(`extract_model_content_refs`), updates 모드에서 www 정본 host + `/films|photos/<slug>` 경로 fullmatch로 필터링한다. 페이지 전체를 긁으면 타 모델 영상이 큐에 섞인다 (2026-09-27 toree/ryonen 실측: toree 페이지 전체 81건 중 정본 2건)
 - **Hegre `/models/films/<slug>`는 실제 라우트가 아니다** — 모델 필름 탭 URL로 보이지만 접속 시 사이트 전체 신작 목록(74건)이 돌아온다. 모델 본인 목록은 `/models/<slug>`의 `#films-wrapper`만이 Source of Truth다 (2026-09-27 toree 실측)
+- **W4B 크롤러** (2026-09-28 실측): 모든 세트의 정본은 `/updates/<slug>`(films/galleries는 필터 목록, stories는 에디토리얼 제외). 다운로드 패널(ZIP+최고해상도 mp4)은 툴바 Download 클릭 후 JS가 href를 채운다 — 정적 fetch 불가, Playwright 상호작용 필수
+- **W4B 연령 게이트**가 포인터를 가로채 click이 무시된다 — 로그인 제출은 JS requestSubmit, 게이트는 `_dismiss_age_gate`가 자동 수락(수락 쿠키는 w4b_profile에 유지)
+- **W4B 세션 시딩**: login()이 CLI 어디서도 자동 호출되지 않으므로 신규 머신/쿠키 만료 시 login()을 먼저 실행한다. credentials는 로컬 config `[credentials.w4b]`
+- **W4B 겸용 세트(ZIP+mp4) premium.db 기록**: gallery는 `url#type` 행 분리, downloads는 파일별 키(`#type` 접미). is_downloaded는 LIKE로 세트 단위 skip 유지. STARRING 앵커는 빈 이미지 앵커가 먼저 오고 mp4 패널 href는 상대경로(urljoin 필수)
