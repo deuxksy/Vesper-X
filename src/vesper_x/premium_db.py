@@ -98,9 +98,14 @@ class PremiumDB:
                        gtype: str, date: Optional[str] = None,
                        resolution: Optional[str] = None) -> int:
         conn = self._connect()
-        row = conn.execute("SELECT id FROM galleries WHERE url = ?", (url,)).fetchone()
+        row = conn.execute("SELECT id, type FROM galleries WHERE url = ?", (url,)).fetchone()
         if row:
-            return row[0]
+            if row[1] == gtype:
+                return row[0]
+            # 겸용 세트(ZIP+mp4)는 type별 행 분리 - models 보유 집계 정확성 (2026-09-28 리뷰).
+            # 기존 단일 타입 사이트(H)의 행은 url 무변경으로 유지된다
+            url = f"{url}#{gtype}"
+            row = conn.execute("SELECT id FROM galleries WHERE url = ?", (url,)).fetchone()
         cur = conn.execute(
             "INSERT INTO galleries (model_id, title, url, date, type, resolution, site) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -118,15 +123,18 @@ class PremiumDB:
         conn.commit()
 
     def is_downloaded(self, url: str) -> bool:
+        """세트 단위 skip 판정 - type 접미(#photo/#video) 행도 같은 세트로 본다."""
         conn = self._connect()
         return conn.execute(
-            "SELECT 1 FROM downloads WHERE url = ?", (url,)).fetchone() is not None
+            "SELECT 1 FROM downloads WHERE url = ? OR url LIKE ? || '#%'",
+            (url, url)).fetchone() is not None
 
     def holding_by_model(self, name_like: str) -> list[dict]:
         """모델명 부분일치(대소문자 무관) 보유 집계 - models 명령의 premium(H) 조회용."""
         conn = self._connect()
         rows = conn.execute(
             "SELECT m.name,"
+            " m.site,"
             " SUM(g.type = 'video') AS videos,"
             " SUM(g.type = 'photo') AS photos,"
             " MAX(d.dispatched_at) AS last_at"
@@ -134,11 +142,11 @@ class PremiumDB:
             " JOIN galleries g ON d.gallery_id = g.id"
             " JOIN models m ON g.model_id = m.id"
             " WHERE m.name LIKE ? COLLATE NOCASE"
-            " GROUP BY m.name"
+            " GROUP BY m.name, m.site"
             " ORDER BY m.name",
             (f"%{name_like}%",),
         ).fetchall()
-        return [dict(zip(("name", "videos", "photos", "last_at"), r)) for r in rows]
+        return [dict(zip(("name", "site", "videos", "photos", "last_at"), r)) for r in rows]
 
     def get_crawl_checkpoint(self, site: str) -> Optional[str]:
         conn = self._connect()

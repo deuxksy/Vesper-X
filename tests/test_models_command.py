@@ -72,13 +72,13 @@ def test_models_command_shows_premium_holdings_without_cosplay_db():
     registry.lookup.return_value = None
     db = MagicMock()
     db.holding_by_model.return_value = [
-        {"name": "Toree", "videos": 2, "photos": 0, "last_at": "2026-09-27 22:33:21"},
+        {"name": "Toree", "site": "H", "videos": 2, "photos": 0, "last_at": "2026-09-27 22:33:21"},
     ]
     with patch("vesper_x.cli.ModelRegistry", return_value=registry), \
          patch("vesper_x.cli.PremiumDB", return_value=db):
         result = runner.invoke(app, ["models", "toree"])
     assert result.exit_code == 0
-    assert "premium (H) 보유" in result.output
+    assert "premium 보유" in result.output
     assert "Toree" in result.output
     assert "영상 2 / 사진 0" in result.output
 
@@ -89,7 +89,7 @@ def test_models_command_shows_premium_holdings_alongside_cosplay_info():
     registry.lookup.return_value = INFO
     db = MagicMock()
     db.holding_by_model.return_value = [
-        {"name": "ZinieQ", "videos": 1, "photos": 3, "last_at": None},
+        {"name": "ZinieQ", "site": "H", "videos": 1, "photos": 3, "last_at": None},
     ]
     with patch("vesper_x.cli.ModelRegistry", return_value=registry), \
          patch("vesper_x.cli.PremiumDB", return_value=db), \

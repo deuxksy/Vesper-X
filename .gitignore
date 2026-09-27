@@ -21,9 +21,16 @@ data/.omc/
 # 다운로드 콘텐츠 (수집 대상 아님)
 downloads/
 
-# OMC 운영 아티팩트
-.omc/
 
 # 모델 등급/국적 백업 (build가 자동 관리)
 data/.model_prefs_backup.json
 account.txt
+*.sqlite3*
+
+# AI
+.omc/
+.playwright-mcp/
+.rember/
+.serena/
+.superpowers/
+.zzizily/
