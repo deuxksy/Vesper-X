@@ -177,6 +177,11 @@ class FakeCrawler:
     def resolve_content(self, html: str, page_url: str):
         return HegreCrawler.resolve_content(self, html, page_url)
 
+    async def resolve(self, url: str):
+        """run_premium_crawl 루프의 resolve(url) 인터페이스 충족용."""
+        html = await self.fetch(url)
+        return self.resolve_content(html, url)
+
 
 def _cfg():
     return AppConfig(credentials={"hegre": CredentialConfig("u", "p")})
@@ -369,3 +374,18 @@ def test_extract_gallery_refs_excludes_cdn_poster_and_sort_links():
     """updates 모드(페이지 전역 수집)에서 CDN 포스터·정렬 링크가 큐에 섞이지 않는다."""
     refs = HegreCrawler.extract_gallery_refs(NOISE_PAGE, "https://www.hegre.com")
     assert [r["url"] for r in refs] == ["https://www.hegre.com/films/real-film"]
+
+
+# --- resolve 래퍼 (run_premium_crawl 공용 인터페이스) ---
+
+@pytest.mark.asyncio
+async def test_resolve_wrapper_fetches_and_parses(monkeypatch):
+    crawler = _crawler()
+
+    async def fake_fetch(url):
+        return VIDEO_PAGE
+
+    monkeypatch.setattr(crawler, "fetch", fake_fetch)
+    metas = await crawler.resolve("https://hegre.com/films/massage-x")
+    assert metas[0].direct_url == ("https://content.hegre.com/films/ani-cyprus-holiday/"
+                                   "ani-cyprus-holiday-2160p.mp4?d=attachment&v=1642515443")

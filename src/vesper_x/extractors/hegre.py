@@ -228,6 +228,11 @@ class HegreCrawler:
             cookies=self._session_cookie,
         )]
 
+    async def resolve(self, url: str) -> list[DownloadMetadata]:
+        """run_premium_crawl 공용 인터페이스 - fetch+resolve_content를 한 번에."""
+        html = await self.fetch(url)
+        return self.resolve_content(html, url)
+
     # --- Playwright 세션 (골격 — selector는 Task 6 실측에서 확정) ---
 
     async def collect(self, model_slug: Optional[str] = None,
