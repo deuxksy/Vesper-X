@@ -78,7 +78,7 @@ def test_models_command_shows_premium_holdings_without_cosplay_db():
          patch("vesper_x.cli.PremiumDB", return_value=db):
         result = runner.invoke(app, ["models", "toree"])
     assert result.exit_code == 0
-    assert "premium (H) 보유" in result.output
+    assert "premium 보유" in result.output
     assert "Toree" in result.output
     assert "영상 2 / 사진 0" in result.output
 
