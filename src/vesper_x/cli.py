@@ -99,12 +99,19 @@ def _is_hegre_url(url: str) -> bool:
     return host == "hegre.com" or host.endswith(".hegre.com")
 
 
+def _is_w4b_url(url: str) -> bool:
+    """W4B 분기 판정도 hostname 기준 - hegre와 동일 (부분문자열 검사 금지)."""
+    host = urllib.parse.urlparse(url).hostname or ""
+    return host == "watch4beauty.com" or host.endswith(".watch4beauty.com")
+
+
 def _select_crawler(url: str, config: AppConfig):
     """config [sites]의 도메인 매칭으로 crawler를 고른다 - 미등록 도메인은 category 기본."""
     crawlers = {
         "category": CategoryCrawler,
         "cosplaytele": CosplayteleCrawler,
         "hegre": lambda: HegreCrawler(config),
+        "w4b": lambda: W4BCrawler(config),
     }
     host = urllib.parse.urlparse(url).hostname or ""
     for domain, site in config.sites.items():
@@ -735,12 +742,15 @@ def crawl(
     output: Optional[str] = typer.Option(None, "-o", "--output", help="Save extracted URLs to file"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON format"),
     skip_gofile: bool = typer.Option(False, "--skip-gofile", help="Skip Gofile links (e.g. quota exceeded)"),
-    site: Optional[str] = typer.Option(None, "--site", help="사이트 명시 선택 (hegre)"),
+    site: Optional[str] = typer.Option(None, "--site", help="사이트 명시 선택 (hegre, w4b)"),
     model: Optional[str] = typer.Option(None, "--model", help="모델 전체 크롤 (hegre)"),
     new: bool = typer.Option(False, "--new", help="신작 크롤 (체크포인트 기반)"),
     collect: bool = typer.Option(False, "--collect", help="수집만: dispatch_log 큐에 저장 (dispatch는 별도 커맨드)"),
 ):
     """Crawl category or tag listing across multiple pages and process all posts."""
+    if site == "w4b" or (url and _is_w4b_url(url)):
+        return run_premium_crawl(site="w4b", url=url, model=model, new_only=new,
+                                 extract_only=extract_only, limit=limit)
     if site == "hegre" or (url and _is_hegre_url(url)):
         return run_premium_crawl(site="hegre", url=url, model=model, new_only=new,
                                  extract_only=extract_only, limit=limit)

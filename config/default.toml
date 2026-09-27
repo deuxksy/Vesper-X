@@ -6,3 +6,4 @@ download_dir = "/downloads"
 "misskon.com" = { crawler = "category", subdir = "misskon" }
 "cosplaytele.com" = { crawler = "cosplaytele", subdir = "cosplaytele" }
 "hegre.com" = { crawler = "hegre", subdir = "H" }
+"watch4beauty.com" = { crawler = "w4b", subdir = "W4B" }

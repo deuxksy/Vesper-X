@@ -22,6 +22,7 @@ DEFAULT_SITES = {
     "misskon.com": SiteConfig(crawler="category", subdir="misskon"),
     "cosplaytele.com": SiteConfig(crawler="cosplaytele", subdir="cosplaytele"),
     "hegre.com": SiteConfig(crawler="hegre", subdir="H"),
+    "watch4beauty.com": SiteConfig(crawler="w4b", subdir="W4B"),
 }
 
 

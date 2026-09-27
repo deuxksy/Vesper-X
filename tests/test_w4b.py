@@ -129,3 +129,27 @@ def test_launch_kwargs_uses_chrome_channel_and_proxy():
     assert kwargs["channel"] == "chrome"
     assert kwargs["headless"] is False
     assert kwargs["proxy"] == {"server": "http://x:1"}
+
+
+# --- CLI/설정 연결 (Task 5) ---
+from vesper_x.cli import _is_w4b_url, _select_crawler
+
+
+def test_is_w4b_url_hostname_based():
+    assert _is_w4b_url("https://watch4beauty.com/updates/x")
+    assert _is_w4b_url("https://WATCH4BEAUTY.COM/updates/x")      # 대소문자 무관
+    assert _is_w4b_url("https://www.watch4beauty.com/updates/x")  # 서브도메인
+    assert not _is_w4b_url("https://watch4beauty.com.evil.example/x")  # 접미 위장
+    assert not _is_w4b_url("https://evil.example/?ref=watch4beauty.com")  # 쿼리 위장
+
+
+def test_select_crawler_registry_has_w4b():
+    crawler = _select_crawler("https://www.watch4beauty.com/updates/x", AppConfig())
+    assert isinstance(crawler, W4BCrawler)
+
+
+def test_default_sites_contain_w4b():
+    sites = AppConfig().sites
+    assert "watch4beauty.com" in sites
+    assert sites["watch4beauty.com"].subdir == "W4B"
+    assert sites["watch4beauty.com"].crawler == "w4b"
