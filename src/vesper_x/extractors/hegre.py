@@ -28,7 +28,7 @@ SELECTORS = {
     "gallery_zip": "a[href*='.zip']",             # 실측: cc.hegre.com zip (?v= 쿼리 때문에 $= 불가)
     "model_name": "a.record-model",               # 실측: 모델명은 title 속성에 있음
     "next_page": "a.next, li.pagination-next a, a[rel='next']",
-    "model_content_sections": "#films-wrapper, #photos-wrapper",  # 모델 페이지 본인 콘텐츠 섹션 (2026-09-27 실측)
+    "model_content_sections": "#films-wrapper, #galleries-wrapper",  # 모델 페이지 본인 콘텐츠 섹션 (2026-09-27 ryonen 실측)
     "login_user": "#username",                    # 실측 2026-09-25
     "login_pass": "#password",                    # 실측 2026-09-25
     "login_submit": "input.submit.not-on-phone",  # 실측 2026-09-25
@@ -179,7 +179,7 @@ class HegreCrawler:
 
     @staticmethod
     def extract_model_content_refs(html: str, base_url: str) -> list[dict]:
-        """모델 페이지의 본인 콘텐츠 섹션(#films/#photos-wrapper) 안에서만 수집.
+        """모델 페이지의 본인 콘텐츠 섹션(#films/#galleries-wrapper) 안에서만 수집.
 
         모델 페이지는 본인 콘텐츠 외에 사이트 신작이 페이지 전역에 노출된다 — 페이지 전체를
         긁으면 타 모델 콘텐츠가 섞인다 (2026-09-27 toree 실측: 페이지 전체 81건 중 정본 2건).
@@ -234,7 +234,7 @@ class HegreCrawler:
                       max_pages: int = 10) -> list[dict]:
         """모델/신작 목록 순회.
 
-        모델 모드는 본인 콘텐츠 섹션(#films/#photos-wrapper)만 — 페이지 전체를 긁으면
+        모델 모드는 본인 콘텐츠 섹션(#films/#galleries-wrapper)만 — 페이지 전체를 긁으면
         사이트 신작 노이즈가 섞인다 (2026-09-27 toree 실측).
         """
         base = (URLS["model"].format(slug=model_slug) if model_slug

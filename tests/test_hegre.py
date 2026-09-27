@@ -323,6 +323,14 @@ MODEL_PAGE = """
     </div>
   </div>
 </div>
+<div id="model-toree-galleries-wrapper" class="section-wrapper">
+  <div id="galleries-wrapper" class="js-infinite-scroll">
+    <div class="item">
+      <a href="/photos/toree-photo-1" class="artwork" data-type="photo" title="Toree Photo 1"></a>
+      <a href="/photos/toree-photo-1" class="playable" title="Toree Photo 1"><h4>Toree Photo 1</h4></a>
+    </div>
+  </div>
+</div>
 <a href="/films/other-model-film">Site Updates Noise</a>
 <a href="/models/films/toree?films_sort=most_recent#films-wrapper">Most Recent</a>
 </body></html>
@@ -344,6 +352,7 @@ def test_extract_model_content_refs_scopes_to_sections():
     assert urls == [
         "https://www.hegre.com/films/toree-film-1",
         "https://www.hegre.com/films/toree-film-2",
+        "https://www.hegre.com/photos/toree-photo-1",
     ]
 
 
