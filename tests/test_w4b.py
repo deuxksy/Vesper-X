@@ -102,3 +102,30 @@ def test_url_and_selector_constants_registered():
     assert URLS["login"] and URLS["model"] and URLS["updates"]
     assert SELECTORS["login_user"] and SELECTORS["login_pass"]
     assert SELECTORS["model_content_links"] and SELECTORS["download_links"]
+
+
+# --- W4BCrawler (Task 2) ---
+import pytest
+
+from vesper_x.config import AppConfig
+
+
+def test_build_cookie_header_filters_and_formats():
+    cookies = [{"name": "other", "value": "1"},
+               {"name": "session", "value": "abc"},
+               {"name": "cf_clearance", "value": "xyz"}]
+    assert W4BCrawler.build_cookie_header(cookies) == "session=abc; cf_clearance=xyz"
+    assert W4BCrawler.build_cookie_header([]) == ""
+
+
+def test_ensure_credentials_missing_raises():
+    with pytest.raises(ValueError, match="credentials.w4b"):
+        W4BCrawler(AppConfig()).ensure_credentials()
+
+
+def test_launch_kwargs_uses_chrome_channel_and_proxy():
+    crawler = W4BCrawler(AppConfig(proxy="http://x:1"))
+    kwargs = crawler._launch_kwargs()
+    assert kwargs["channel"] == "chrome"
+    assert kwargs["headless"] is False
+    assert kwargs["proxy"] == {"server": "http://x:1"}

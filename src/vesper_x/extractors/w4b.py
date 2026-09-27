@@ -4,6 +4,7 @@ DOM/URL 상수는 실측값이며 구조 변경 시 상수만 갱신한다 (hegr
 mp4 서명 URL은 TTL이 있으므로 resolve는 dispatch 직전에만 호출한다.
 """
 import re
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin, urlparse
 
@@ -29,6 +30,9 @@ SELECTORS = {
 _UPDATES_PATH_RE = re.compile(r"/updates/[\w-]+/?")
 _RESOLUTION_RE = re.compile(r"/(\d{3,4})\.mp4")
 _POPULAR_SLUGS = {"popular"}
+
+# 세션 쿠키 유지용 persistent profile - hegre_profile과 동일 패턴
+W4B_PROFILE_DIR = Path.home() / ".config" / "url-resolver" / "w4b_profile"
 
 
 class W4BParser:
@@ -103,3 +107,133 @@ class W4BCrawler:
             seen.add(href)
             refs.append({"url": href, "title": a.get("title")})
         return refs
+
+    @staticmethod
+    def build_cookie_header(cookies: list[dict]) -> str:
+        """aria2 전달용 Cookie 헤더 - session/cf_clearance만 k=v; k=v로 조립.
+
+        cf_clearance는 UA·IP 바인딩이라 브라우저 세션의 실제 UA도 함께 stash한다
+        (_stash_session). Cloudflare가 aria2를 챌린지하지 않으면 잉여다.
+        """
+        wanted = {"session", "cf_clearance"}
+        pairs = [f"{c['name']}={c['value']}" for c in cookies if c.get("name") in wanted]
+        return "; ".join(pairs)
+
+    def ensure_credentials(self) -> CredentialConfig:
+        creds = self.config.credentials.get("w4b")
+        if not creds or not creds.username:
+            raise ValueError(
+                "config.toml [credentials.w4b] 미설정 - username/password를 추가한다")
+        return creds
+
+    def _launch_kwargs(self) -> dict:
+        kwargs: dict = {"channel": "chrome", "headless": False}
+        if self.config.proxy:
+            kwargs["proxy"] = {"server": self.config.proxy}
+        return kwargs
+
+    async def _stash_session(self, context, page) -> None:
+        """CDN/CF 인증용 쿠키와 실제 브라우저 UA를 stash - metadata로 전달된다."""
+        self._cookie_header = self.build_cookie_header(await context.cookies())
+        self._user_agent = await page.evaluate("navigator.userAgent")
+
+    async def collect(self, model_slug: Optional[str] = None) -> list[dict]:
+        """모델/신작 목록 수집 - updates 모드는 무한스크롤 대응 scroll 루프 (스펙 7.1)."""
+        if model_slug:
+            url = URLS["model"].format(slug=model_slug)
+            html = await self.fetch(url)
+            return self.extract_model_content_refs(html, url)
+        html = await self.fetch(URLS["updates"], scrolls=5)
+        return self.extract_model_content_refs(html, URLS["updates"])
+
+    async def fetch(self, url: str, scrolls: int = 0) -> str:
+        """persistent Chrome 세션으로 페이지 HTML 반환 (매 launch, ouo/hegre 패턴)."""
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            W4B_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+            context = await p.chromium.launch_persistent_context(
+                str(W4B_PROFILE_DIR), **self._launch_kwargs())
+            try:
+                page = context.pages[0] if context.pages else await context.new_page()
+                await page.goto(url, wait_until="domcontentloaded")
+                for _ in range(scrolls):
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await page.wait_for_timeout(1000)
+                await self._stash_session(context, page)
+                return await page.content()
+            finally:
+                await context.close()
+
+    async def resolve(self, url: str) -> list[DownloadMetadata]:
+        """세트 페이지에서 Download 패널을 열어 [zip, 최고 mp4] metadata를 만든다.
+
+        링크는 클릭 후 JS가 채우므로 정적 fetch로는 불가능 - Playwright 상호작용 필수
+        (스펙 3.1). 서명 TTL 방어는 루프가 dispatch 직전에만 resolve를 호출한다.
+        """
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            W4B_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+            context = await p.chromium.launch_persistent_context(
+                str(W4B_PROFILE_DIR), **self._launch_kwargs())
+            try:
+                page = context.pages[0] if context.pages else await context.new_page()
+                await page.goto(url, wait_until="domcontentloaded")
+                try:
+                    trigger = page.get_by_role("link", name="Download", exact=True).first
+                    await trigger.click()
+                    await page.wait_for_selector(SELECTORS["download_links"], timeout=10000)
+                except Exception:
+                    pass  # 패널 미오픈 - 아래 추출이 빈 목록이 되고 루프가 계속한다
+                await self._stash_session(context, page)
+                html = await page.content()
+            finally:
+                await context.close()
+
+        soup = BeautifulSoup(html, "html.parser")
+        links = [{"href": a.get("href"), "text": a.get_text(" ", strip=True)}
+                 for a in soup.select(SELECTORS["download_links"])]
+        picks = self.parser.pick_downloads(links, url)
+        model_name = self.parser.extract_model_name(html)
+        album = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+        model_dir = re.sub(r"[^\w\- .()]+", "_", model_name) if model_name else "Unknown"
+        return [DownloadMetadata(
+            direct_url=pick["url"],
+            referer=url,
+            user_agent=self._user_agent,
+            filename=f"{model_dir}/{album}/{pick['basename']}",
+            source_page=url,
+            models=[model_name] if model_name else [],
+            file_page_url=url,
+            cookies=self._cookie_header,
+        ) for pick in picks]
+
+    async def login(self) -> bool:
+        """watch4beauty.com 로그인 → persistent profile에 세션 저장. 성공 여부 반환.
+
+        클릭이 submit을 무시하는 사례가 있어(2026-09-27 실측) requestSubmit fallback.
+        """
+        from playwright.async_api import async_playwright
+        creds = self.ensure_credentials()
+        async with async_playwright() as p:
+            W4B_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+            context = await p.chromium.launch_persistent_context(
+                str(W4B_PROFILE_DIR), **self._launch_kwargs())
+            try:
+                page = context.pages[0] if context.pages else await context.new_page()
+                await page.goto(URLS["login"], wait_until="domcontentloaded")
+                await page.fill(SELECTORS["login_user"], creds.username)
+                await page.fill(SELECTORS["login_pass"], creds.password)
+                await page.click("form button[type=submit]")
+                try:
+                    await page.wait_for_load_state("networkidle")
+                except Exception:
+                    pass
+                if "/login" in page.url:
+                    await page.evaluate("document.querySelector('form').requestSubmit()")
+                    try:
+                        await page.wait_for_load_state("networkidle")
+                    except Exception:
+                        pass
+                return "/login" not in page.url
+            finally:
+                await context.close()
