@@ -28,6 +28,7 @@ SELECTORS = {
     "gallery_zip": "a[href*='.zip']",             # 실측: cc.hegre.com zip (?v= 쿼리 때문에 $= 불가)
     "model_name": "a.record-model",               # 실측: 모델명은 title 속성에 있음
     "next_page": "a.next, li.pagination-next a, a[rel='next']",
+    "model_content_sections": "#films-wrapper, #photos-wrapper",  # 모델 페이지 본인 콘텐츠 섹션 (2026-09-27 실측)
     "login_user": "#username",                    # 실측 2026-09-25
     "login_pass": "#password",                    # 실측 2026-09-25
     "login_submit": "input.submit.not-on-phone",  # 실측 2026-09-25
@@ -38,6 +39,23 @@ CDN_HOSTS = {"content.hegre.com", "cc.hegre.com"}
 
 _RESOLUTION_RE = re.compile(r"(\d{3,4})\s*p", re.IGNORECASE)
 _PIXELS_RE = re.compile(r"(\d{4,5})\s*px", re.IGNORECASE)
+
+# 정본 www 페이지의 콘텐츠 경로만 - CDN 포스터(pp.hegre.com)·정렬 링크(/models/films/...) 제외
+WWW_HOSTS = {"hegre.com", "www.hegre.com"}
+_CONTENT_PATH_FULL_RE = re.compile(r"/(?:films?|photos?)/[\w-]+/?")
+
+
+def _content_ref(a, base_url: str) -> Optional[dict]:
+    """a 태그를 정본 콘텐츠 링크({url, title})로 정규화 - 비(非)콘텐츠 링크는 None."""
+    href = urljoin(base_url, a["href"])
+    parsed = urlparse(href)
+    if parsed.hostname not in WWW_HOSTS:
+        return None
+    if not _CONTENT_PATH_FULL_RE.fullmatch(parsed.path):
+        return None
+    # artwork anchor는 텍스트가 없고 title 속성에 앨범 제목이 있다 (extract_model_name 동일 패턴)
+    title = a.get("title") or a.get_text(" ", strip=True) or None
+    return {"url": href, "title": title}
 
 
 class HegreParser:
@@ -122,8 +140,6 @@ DEFAULT_USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                       "AppleWebKit/537.36 (KHTML, like Gecko) "
                       "Chrome/128.0.0.0 Safari/537.36")
 
-_CONTENT_PATH_RE = re.compile(URLS["content_path"])
-
 
 class HegreCrawler:
     """인증 세션(persistent Chrome profile) + 목록 수집.
@@ -155,10 +171,29 @@ class HegreCrawler:
         refs: list[dict] = []
         seen: set[str] = set()
         for a in soup.select("a[href]"):
-            href = urljoin(base_url, a["href"])
-            if _CONTENT_PATH_RE.search(urlparse(href).path) and href not in seen:
-                seen.add(href)
-                refs.append({"url": href, "title": a.get_text(" ", strip=True)})
+            ref = _content_ref(a, base_url)
+            if ref and ref["url"] not in seen:
+                seen.add(ref["url"])
+                refs.append(ref)
+        return refs
+
+    @staticmethod
+    def extract_model_content_refs(html: str, base_url: str) -> list[dict]:
+        """모델 페이지의 본인 콘텐츠 섹션(#films/#photos-wrapper) 안에서만 수집.
+
+        모델 페이지는 본인 콘텐츠 외에 사이트 신작이 페이지 전역에 노출된다 — 페이지 전체를
+        긁으면 타 모델 콘텐츠가 섞인다 (2026-09-27 toree 실측: 페이지 전체 81건 중 정본 2건).
+        섹션 부재 시 빈 목록 — 전역 fallback은 타 모델 오다운로드를 유발한다.
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        refs: list[dict] = []
+        seen: set[str] = set()
+        for sec in soup.select(SELECTORS["model_content_sections"]):
+            for a in sec.select("a[href]"):
+                ref = _content_ref(a, base_url)
+                if ref and ref["url"] not in seen:
+                    seen.add(ref["url"])
+                    refs.append(ref)
         return refs
 
     @staticmethod
@@ -197,14 +232,20 @@ class HegreCrawler:
 
     async def collect(self, model_slug: Optional[str] = None,
                       max_pages: int = 10) -> list[dict]:
-        """모델/신작 목록 순회 — selector는 Task 6 실측에서 확정."""
+        """모델/신작 목록 순회.
+
+        모델 모드는 본인 콘텐츠 섹션(#films/#photos-wrapper)만 — 페이지 전체를 긁으면
+        사이트 신작 노이즈가 섞인다 (2026-09-27 toree 실측).
+        """
         base = (URLS["model"].format(slug=model_slug) if model_slug
                 else URLS["updates"])
         refs: list[dict] = []
         url: Optional[str] = base
         for _ in range(max_pages):
             html = await self.fetch(url)
-            refs.extend(self.extract_gallery_refs(html, url))
+            extractor = (self.extract_model_content_refs if model_slug
+                         else self.extract_gallery_refs)
+            refs.extend(extractor(html, url))
             url = self.extract_next_page_url(html, url)
             if not url:
                 break

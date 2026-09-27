@@ -304,3 +304,55 @@ def test_launch_kwargs_pins_english_locale():
     """모델명이 로케일 번역으로 오염되지 않게 영어를 고정한다 (키키 사례)."""
     kwargs = _crawler()._launch_kwargs()
     assert kwargs["locale"] == "en-US"
+
+
+# --- 모델 페이지 섹션 scoping (2026-09-27 toree 실측) ---
+
+MODEL_PAGE = """
+<html><body>
+<div id="model-toree-films-wrapper" class="section-wrapper">
+  <div id="films-wrapper" class="js-infinite-scroll">
+    <div class="item">
+      <a href="/films/toree-film-1" class="artwork playable" data-type="film" title="Toree Film 1"></a>
+      <a href="/films/toree-film-1" class="playable" title="Toree Film 1"><h4>Toree Film 1</h4></a>
+      <a href="https://pp.hegre.com/films/toree-film-1/toree-film-1-poster-image-800x.jpg?v=1">cover</a>
+    </div>
+    <div class="item">
+      <a href="/films/toree-film-2" class="artwork playable" data-type="film" title="Toree Film 2"></a>
+      <a href="/films/toree-film-2" class="playable" title="Toree Film 2"><h4>Toree Film 2</h4></a>
+    </div>
+  </div>
+</div>
+<a href="/films/other-model-film">Site Updates Noise</a>
+<a href="/models/films/toree?films_sort=most_recent#films-wrapper">Most Recent</a>
+</body></html>
+"""
+
+NOISE_PAGE = """
+<html><body>
+<a href="https://pp.hegre.com/films/x/x-poster-image-800x.jpg?v=1">cover</a>
+<a href="https://www.hegre.com/models/films/toree?films_sort=most_recent#films-wrapper">Most Recent</a>
+<a href="/films/real-film">Real Film</a>
+</body></html>
+"""
+
+
+def test_extract_model_content_refs_scopes_to_sections():
+    """모델 페이지는 #films-wrapper 섹션 안만 수집한다 - 사이트 신작 노이즈 제외."""
+    refs = HegreCrawler.extract_model_content_refs(MODEL_PAGE, "https://www.hegre.com/models/toree")
+    urls = [r["url"] for r in refs]
+    assert urls == [
+        "https://www.hegre.com/films/toree-film-1",
+        "https://www.hegre.com/films/toree-film-2",
+    ]
+
+
+def test_extract_model_content_refs_empty_without_sections():
+    """섹션 부재 시 빈 목록 — 전역 fallback은 타 모델 오다운로드를 유발한다."""
+    assert HegreCrawler.extract_model_content_refs(EMPTY_PAGE, "https://www.hegre.com/models/x") == []
+
+
+def test_extract_gallery_refs_excludes_cdn_poster_and_sort_links():
+    """updates 모드(페이지 전역 수집)에서 CDN 포스터·정렬 링크가 큐에 섞이지 않는다."""
+    refs = HegreCrawler.extract_gallery_refs(NOISE_PAGE, "https://www.hegre.com")
+    assert [r["url"] for r in refs] == ["https://www.hegre.com/films/real-film"]
