@@ -20,6 +20,7 @@ from vesper_x.extractors.crawler import CategoryCrawler
 from vesper_x.extractors.cosplaytele import CosplayteleParser, CosplayteleCrawler
 from vesper_x.extractors.gofile import GofileResolver
 from vesper_x.extractors.hegre import HegreCrawler
+from vesper_x.extractors.w4b import W4BCrawler
 from vesper_x.extractors.mediafire import MediafireResolver
 from vesper_x.extractors.misskon import MisskonParser
 from vesper_x.extractors.ouo import OuoBypasser
@@ -545,21 +546,29 @@ def parse(
     handle_results(metadata_list, extract_only=extract_only, output=output, copy=copy, json_output=json_output)
 
 
-def run_hegre_crawl(url: Optional[str], model: Optional[str], new_only: bool,
-                    extract_only: bool, limit: int,
-                    config: Optional[AppConfig] = None,
-                    db: Optional[PremiumDB] = None,
-                    crawler: Optional[HegreCrawler] = None) -> None:
-    """Hegre 크롤 — 목록 수집은 URL만, CDN resolve는 dispatch 직전 (spec 4.3).
+PREMIUM_SITES = {
+    "hegre": (HegreCrawler, "H"),
+    "w4b": (W4BCrawler, "W4B"),
+}
 
-    skip 판정/이력은 premium.db 단일 소스다 (cosplay.db dispatch_log 미참조, spec 4.4).
+
+def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str] = None,
+                      new_only: bool = False, extract_only: bool = False, limit: int = 0,
+                      config: Optional[AppConfig] = None,
+                      db: Optional[PremiumDB] = None,
+                      crawler=None) -> None:
+    """프리미엄 크롤 공용 루프 — site가 crawler/site 코드/creds 키를 결정한다.
+
+    목록 수집은 URL만, CDN resolve는 dispatch 직전 (spec 4.3).
+    skip 패정/이력은 premium.db 단일 소스다 (cosplay.db dispatch_log 미참조, spec 4.4).
     """
+    crawler_cls, site_code = PREMIUM_SITES[site]
     config = config or load_config()
     db = db or PremiumDB()
-    crawler = crawler or HegreCrawler(config)
-    creds = config.credentials.get("hegre")
+    crawler = crawler or crawler_cls(config)
+    creds = config.credentials.get(site)
     if not creds or not creds.username:
-        console.print("[bold red]config.toml [credentials.hegre] 미설정 - "
+        console.print(f"[bold red]config.toml [credentials.{site}] 미설정 - "
                       "username/password를 추가한다[/bold red]")
         raise typer.Exit(1)
 
@@ -576,8 +585,7 @@ def run_hegre_crawl(url: Optional[str], model: Optional[str], new_only: bool,
             console.print(f"[dim]skip (dispatched): {ref['url']}[/dim]")
             continue
         try:
-            html = run_async(crawler.fetch(ref["url"]))
-            metadata_list = crawler.resolve_content(html, ref["url"])
+            metadata_list = run_async(crawler.resolve(ref["url"]))
             if not metadata_list:
                 console.print(f"[yellow]다운로드 링크 없음: {ref['url']}[/yellow]")
                 continue
@@ -589,10 +597,10 @@ def run_hegre_crawl(url: Optional[str], model: Optional[str], new_only: bool,
                     # 이력 기록은 dispatch 성공 후에만 - extract-only가 skip 상태를
                     # 오염시키지 않는다 (기존 handle_results와 동일 의미론)
                     model_name = m.models[0] if m.models else "Unknown"
-                    model_id = db.upsert_model(model_name, "H")
+                    model_id = db.upsert_model(model_name, site_code)
                     ctype = "video" if m.direct_url.split("?")[0].endswith(".mp4") else "photo"
                     gallery_id = db.upsert_gallery(
-                        model_id, ref.get("title") or ref["url"], m.file_page_url, "H", ctype)
+                        model_id, ref.get("title") or ref["url"], m.file_page_url, site_code, ctype)
                     db.record_download(gallery_id, m.file_page_url, m.filename,
                                        direct_url=m.direct_url)
                 else:
@@ -601,11 +609,11 @@ def run_hegre_crawl(url: Optional[str], model: Optional[str], new_only: bool,
             raise
         except Exception as e:
             # 1건 실패가 전체 크롤을 중단하지 않는다 (run_crawl/handle_results와 동일)
-            console.print(f"[bold red]Hegre 처리 실패 {ref['url']}: {e}[/bold red]")
+            console.print(f"[bold red]{site} 처리 실패 {ref['url']}: {e}[/bold red]")
             continue
     if new_only:
         db.update_crawl_checkpoint(
-            "H", datetime.datetime.now(datetime.timezone.utc).isoformat())
+            site_code, datetime.datetime.now(datetime.timezone.utc).isoformat())
 
 
 def run_crawl(url: str, pages: int = 1, limit: int = 0, extract_only: bool = False,
@@ -734,8 +742,8 @@ def crawl(
 ):
     """Crawl category or tag listing across multiple pages and process all posts."""
     if site == "hegre" or (url and _is_hegre_url(url)):
-        return run_hegre_crawl(url=url, model=model, new_only=new,
-                               extract_only=extract_only, limit=limit)
+        return run_premium_crawl(site="hegre", url=url, model=model, new_only=new,
+                                 extract_only=extract_only, limit=limit)
     if not url:
         console.print("[red]URL이 필요하다 (--site hegre 제외)[/red]")
         raise typer.Exit(1)

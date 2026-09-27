@@ -150,7 +150,7 @@ def test_ensure_credentials_present():
 # --- CLI 통합 (Task 5) ---
 
 import typer
-from vesper_x.cli import run_hegre_crawl
+from vesper_x.cli import run_premium_crawl
 from vesper_x.premium_db import PremiumDB
 
 
@@ -187,7 +187,7 @@ def _cfg():
     return AppConfig(credentials={"hegre": CredentialConfig("u", "p")})
 
 
-def test_run_hegre_crawl_dispatches_and_records(tmp_path, monkeypatch):
+def test_run_premium_crawl_dispatches_and_records(tmp_path, monkeypatch):
     db = PremiumDB(tmp_path / "premium.db")
     crawler = FakeCrawler({
         "https://hegre.com/films/massage-x": VIDEO_PAGE,
@@ -198,7 +198,7 @@ def test_run_hegre_crawl_dispatches_and_records(tmp_path, monkeypatch):
             return "gid-1"
 
     monkeypatch.setattr("vesper_x.cli.Aria2Dispatcher", lambda cfg: FakeDispatcher())
-    run_hegre_crawl(url="https://hegre.com/films/massage-x", model=None,
+    run_premium_crawl(site="hegre", url="https://hegre.com/films/massage-x", model=None,
                     new_only=False, extract_only=False, limit=0,
                     config=_cfg(), db=db, crawler=crawler)
     assert db.is_downloaded("https://hegre.com/films/massage-x")
@@ -208,50 +208,50 @@ def test_run_hegre_crawl_dispatches_and_records(tmp_path, monkeypatch):
     assert row == ("https://content.hegre.com/films/ani-cyprus-holiday/ani-cyprus-holiday-2160p.mp4?d=attachment&v=1642515443",)
 
 
-def test_run_hegre_crawl_extract_only_does_not_record(tmp_path):
+def test_run_premium_crawl_extract_only_does_not_record(tmp_path):
     """extract-only는 dispatch하지 않으므로 skip 상태를 오염시키지 않는다."""
     db = PremiumDB(tmp_path / "premium.db")
     crawler = FakeCrawler({
         "https://hegre.com/films/massage-x": VIDEO_PAGE,
     })
-    run_hegre_crawl(url="https://hegre.com/films/massage-x", model=None,
+    run_premium_crawl(site="hegre", url="https://hegre.com/films/massage-x", model=None,
                     new_only=False, extract_only=True, limit=0,
                     config=_cfg(), db=db, crawler=crawler)
     assert not db.is_downloaded("https://hegre.com/films/massage-x")
 
 
-def test_run_hegre_crawl_skips_dispatched(tmp_path):
+def test_run_premium_crawl_skips_dispatched(tmp_path):
     db = PremiumDB(tmp_path / "premium.db")
     db.record_download(None, "https://hegre.com/films/massage-x")
     crawler = FakeCrawler({})  # fetch되면 안 된다 — skip이 먼저다
-    run_hegre_crawl(url="https://hegre.com/films/massage-x", model=None,
+    run_premium_crawl(site="hegre", url="https://hegre.com/films/massage-x", model=None,
                     new_only=False, extract_only=True, limit=0,
                     config=_cfg(), db=db, crawler=crawler)
 
 
-def test_run_hegre_crawl_no_links_continues(tmp_path):
+def test_run_premium_crawl_no_links_continues(tmp_path):
     db = PremiumDB(tmp_path / "premium.db")
     crawler = FakeCrawler({"https://hegre.com/films/empty": EMPTY_PAGE})
-    run_hegre_crawl(url="https://hegre.com/films/empty", model=None,
+    run_premium_crawl(site="hegre", url="https://hegre.com/films/empty", model=None,
                     new_only=False, extract_only=True, limit=0,
                     config=_cfg(), db=db, crawler=crawler)
     assert not db.is_downloaded("https://hegre.com/films/empty")
 
 
-def test_run_hegre_crawl_updates_checkpoint_for_new(tmp_path):
+def test_run_premium_crawl_updates_checkpoint_for_new(tmp_path):
     db = PremiumDB(tmp_path / "premium.db")
     crawler = FakeCrawler({"https://hegre.com/films/massage-x": VIDEO_PAGE})
-    run_hegre_crawl(url="https://hegre.com/films/massage-x", model=None,
+    run_premium_crawl(site="hegre", url="https://hegre.com/films/massage-x", model=None,
                     new_only=True, extract_only=True, limit=0,
                     config=_cfg(), db=db, crawler=crawler)
     assert db.get_crawl_checkpoint("H") is not None
 
 
-def test_run_hegre_crawl_no_credentials_exits(tmp_path):
+def test_run_premium_crawl_no_credentials_exits(tmp_path):
     db = PremiumDB(tmp_path / "premium.db")
     crawler = FakeCrawler({})
     with pytest.raises(typer.Exit):
-        run_hegre_crawl(url="https://hegre.com/films/x", model=None,
+        run_premium_crawl(site="hegre", url="https://hegre.com/films/x", model=None,
                         new_only=False, extract_only=True, limit=0,
                         config=AppConfig(), db=db, crawler=crawler)
 
@@ -273,7 +273,7 @@ def test_is_hegre_url_hostname_based():
     assert not _is_hegre_url("https://evil.example/?ref=hegre.com")
 
 
-def test_run_hegre_crawl_continues_after_item_failure(tmp_path, monkeypatch):
+def test_run_premium_crawl_continues_after_item_failure(tmp_path, monkeypatch):
     db = PremiumDB(tmp_path / "premium.db")
 
     class FakeDispatcher:
@@ -288,7 +288,7 @@ def test_run_hegre_crawl_continues_after_item_failure(tmp_path, monkeypatch):
         {"url": "https://hegre.com/films/broken", "title": "broken"},
         {"url": "https://hegre.com/films/ok", "title": "ok"},
     ])
-    run_hegre_crawl(url=None, model=None, new_only=False,
+    run_premium_crawl(site="hegre", url=None, model=None, new_only=False,
                     extract_only=False, limit=0,
                     config=_cfg(), db=db, crawler=crawler)
     assert db.is_downloaded("https://hegre.com/films/ok")
