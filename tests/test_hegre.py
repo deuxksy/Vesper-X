@@ -203,7 +203,7 @@ def test_run_premium_crawl_dispatches_and_records(tmp_path, monkeypatch):
                     config=_cfg(), db=db, crawler=crawler)
     assert db.is_downloaded("https://hegre.com/films/massage-x")
     row = db._connect().execute(
-        "SELECT direct_url FROM downloads WHERE url = ?",
+        "SELECT direct_url FROM downloads WHERE url LIKE ? || '#%'",
         ("https://hegre.com/films/massage-x",)).fetchone()
     assert row == ("https://content.hegre.com/films/ani-cyprus-holiday/ani-cyprus-holiday-2160p.mp4?d=attachment&v=1642515443",)
 

@@ -609,7 +609,9 @@ def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str]
                     ctype = "video" if m.direct_url.split("?")[0].endswith(".mp4") else "photo"
                     gallery_id = db.upsert_gallery(
                         model_id, ref.get("title") or ref["url"], m.file_page_url, site_code, ctype)
-                    db.record_download(gallery_id, m.file_page_url, m.filename,
+                    # downloads 키는 파일별 분리(#type) - 겸용 세트의 두 번째 파일이
+                    # 첫 파일 기록을 덮어쓰지 않게 한다 (2026-09-28 리뷰)
+                    db.record_download(gallery_id, f"{m.file_page_url}#{ctype}", m.filename,
                                        direct_url=m.direct_url)
                 else:
                     console.print(f"[cyan]extract-only: {m.filename} - {m.direct_url}[/cyan]")

@@ -41,6 +41,13 @@ def test_pick_downloads_returns_zip_and_4k():
     ]
 
 
+def test_pick_downloads_resolves_relative_mp4():
+    href = "/api/media/download/issues/2022/02/x/backstage/2160.mp4?ttl=1&token=a"
+    picks = W4BParser.pick_downloads([{"href": href, "text": "Download 4K"}], BASE)
+    assert picks[0]["url"] == "https://www.watch4beauty.com" + href
+    assert picks[0]["basename"] == "2160.mp4"
+
+
 def test_pick_downloads_prefers_2160_over_1080():
     picks = W4BParser.pick_downloads(
         [{"href": MP4_1080, "text": "Download HD"},
@@ -70,6 +77,15 @@ def test_pick_downloads_empty():
 def test_extract_model_name_verbatim():
     assert W4BParser.extract_model_name(SET_PAGE) == "CHRISTY WHITE"
     assert W4BParser.extract_model_name("<html><body></body></html>") is None
+
+
+def test_extract_model_name_skips_empty_anchor_and_starring_prefix():
+    page = ('<html><body>'
+            '<a href="/models/christy-white"></a>'
+            '<a href="/models/christy-white">STARRING CHRISTY WHITE</a>'
+            '<a href="/models">Popular models</a>'
+            '</body></html>')
+    assert W4BParser.extract_model_name(page) == "CHRISTY WHITE"
 
 
 def test_extract_model_content_refs_updates_only():
@@ -171,6 +187,27 @@ def test_holding_by_model_includes_site(tmp_path):
     assert rows[0]["site"] == "W4B"
     assert rows[0]["videos"] == 0
     assert rows[0]["photos"] == 1
+
+
+def test_dual_type_set_records_both_files(tmp_path):
+    """겸용 세트(ZIP+mp4)는 type별로 분리 기록된다 - models 보유 집계가 거짓말하지 않게.
+
+    같은 세트 URL에 photo/video가 연달아 기록되면 gallery 행이 분리되고,
+    downloads 키도 파일별로 분리된다. is_downloaded는 세트 단위 skip을 유지한다.
+    """
+    db = PremiumDB(tmp_path / "premium.db")
+    mid = db.upsert_model("Christy White", "W4B")
+    set_url = "https://www.watch4beauty.com/updates/quickie-by-the-pool"
+    g1 = db.upsert_gallery(mid, "Quickie By The Pool", set_url, "W4B", "photo")
+    db.record_download(g1, set_url + "#photo", "20220227-max.zip",
+                       direct_url="https://www.watch4beauty.com/api/media/20220227-max.zip")
+    g2 = db.upsert_gallery(mid, "Quickie By The Pool", set_url, "W4B", "video")
+    db.record_download(g2, set_url + "#video", "2160.mp4",
+                       direct_url="https://www.watch4beauty.com/api/media/download/issues/x/2160.mp4")
+    assert g1 != g2
+    rows = db.holding_by_model("christy")
+    assert (rows[0]["videos"], rows[0]["photos"]) == (1, 1)
+    assert db.is_downloaded(set_url)  # 세트 단위 skip 판정 유지
 
 
 def test_holding_by_model_hegre_regression(tmp_path):

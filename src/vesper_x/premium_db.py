@@ -98,9 +98,14 @@ class PremiumDB:
                        gtype: str, date: Optional[str] = None,
                        resolution: Optional[str] = None) -> int:
         conn = self._connect()
-        row = conn.execute("SELECT id FROM galleries WHERE url = ?", (url,)).fetchone()
+        row = conn.execute("SELECT id, type FROM galleries WHERE url = ?", (url,)).fetchone()
         if row:
-            return row[0]
+            if row[1] == gtype:
+                return row[0]
+            # 겸용 세트(ZIP+mp4)는 type별 행 분리 - models 보유 집계 정확성 (2026-09-28 리뷰).
+            # 기존 단일 타입 사이트(H)의 행은 url 무변경으로 유지된다
+            url = f"{url}#{gtype}"
+            row = conn.execute("SELECT id FROM galleries WHERE url = ?", (url,)).fetchone()
         cur = conn.execute(
             "INSERT INTO galleries (model_id, title, url, date, type, resolution, site) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -118,9 +123,11 @@ class PremiumDB:
         conn.commit()
 
     def is_downloaded(self, url: str) -> bool:
+        """세트 단위 skip 판정 - type 접미(#photo/#video) 행도 같은 세트로 본다."""
         conn = self._connect()
         return conn.execute(
-            "SELECT 1 FROM downloads WHERE url = ?", (url,)).fetchone() is not None
+            "SELECT 1 FROM downloads WHERE url = ? OR url LIKE ? || '#%'",
+            (url, url)).fetchone() is not None
 
     def holding_by_model(self, name_like: str) -> list[dict]:
         """모델명 부분일치(대소문자 무관) 보유 집계 - models 명령의 premium(H) 조회용."""

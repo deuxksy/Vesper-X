@@ -65,20 +65,26 @@ class W4BParser:
         if videos:
             # 2160 우선, 없으면 가용 최대 해상도
             best = max(videos, key=lambda v: (v["resolution"] == 2160, v["resolution"]))
+            # 실측상 mp4 패널 href도 상대경로다 - aria2 전달을 위해 urljoin 필수
+            mp4_url = urljoin(base_url, best["url"])
             picks.append({
-                "url": best["url"],
+                "url": mp4_url,
                 "type": "video",
-                "basename": best["url"].split("?")[0].rsplit("/", 1)[-1],
+                "basename": mp4_url.split("?")[0].rsplit("/", 1)[-1],
             })
         return picks
 
     @staticmethod
     def extract_model_name(html: str) -> Optional[str]:
+        """모델 페이지로 가는 앵커 중 텍스트 있는 것을 고른다 - 첫 앵커는 이미지라
+        텍스트가 없다 (2026-09-28 E2E 실측). STARRING 라벨은 접두 제거한다."""
         soup = BeautifulSoup(html, "html.parser")
-        a = soup.select_one("a[href*='/models/']")
-        if not a:
-            return None
-        return a.get_text(" ", strip=True) or None
+        for a in soup.select("a[href*='/models/']"):
+            text = a.get_text(" ", strip=True)
+            if not text:
+                continue
+            return re.sub(r"(?i)^starring\s+", "", text).strip() or None
+        return None
 
 
 class W4BCrawler:
@@ -132,6 +138,18 @@ class W4BCrawler:
             kwargs["proxy"] = {"server": self.config.proxy}
         return kwargs
 
+    async def _dismiss_age_gate(self, page) -> None:
+        """Adults only 오버레이를 수락해 닫는다 - 수락 쿠키는 profile에 유지된다.
+
+        미수락 상태로는 본문 클릭·다운로드 패널이 모두 막힌다 (2026-09-28 E2E 실측).
+        """
+        gate = page.locator("a.button.greenfull[title*='Yes, enter']")
+        try:
+            if await gate.count() > 0:
+                await gate.first.click(timeout=3000)
+        except Exception:
+            pass  # 게이트 부재/지연 렌더 - 이후 단계에서 재시도 없이 진행
+
     async def _stash_session(self, context, page) -> None:
         """CDN/CF 인증용 쿠키와 실제 브라우저 UA를 stash - metadata로 전달된다."""
         self._cookie_header = self.build_cookie_header(await context.cookies())
@@ -156,6 +174,7 @@ class W4BCrawler:
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
                 await page.goto(url, wait_until="domcontentloaded")
+                await self._dismiss_age_gate(page)
                 for _ in range(scrolls):
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                     await page.wait_for_timeout(1000)
@@ -178,6 +197,13 @@ class W4BCrawler:
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
                 await page.goto(url, wait_until="domcontentloaded")
+                await self._dismiss_age_gate(page)
+                try:
+                    # STARRING 섹션은 SPA 지연 렌더라 networkidle까지 대기해야
+                    # 모델명을 안정적으로 추출한다 (2026-09-28 E2E 실측)
+                    await page.wait_for_load_state("networkidle")
+                except Exception:
+                    pass
                 try:
                     trigger = page.get_by_role("link", name="Download", exact=True).first
                     await trigger.click()
@@ -221,19 +247,16 @@ class W4BCrawler:
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
                 await page.goto(URLS["login"], wait_until="domcontentloaded")
+                await self._dismiss_age_gate(page)
                 await page.fill(SELECTORS["login_user"], creds.username)
                 await page.fill(SELECTORS["login_pass"], creds.password)
-                await page.click("form button[type=submit]")
+                # 연령 게이트 오버레이가 포인터를 가로채 click이 타임아웃된다
+                # (2026-09-28 실측) - JS submit이 확실한 경로다
+                await page.evaluate("document.querySelector('form').requestSubmit()")
                 try:
                     await page.wait_for_load_state("networkidle")
                 except Exception:
                     pass
-                if "/login" in page.url:
-                    await page.evaluate("document.querySelector('form').requestSubmit()")
-                    try:
-                        await page.wait_for_load_state("networkidle")
-                    except Exception:
-                        pass
                 return "/login" not in page.url
             finally:
                 await context.close()
