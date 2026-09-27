@@ -9,7 +9,7 @@
 | 의존성 설치 | `uv sync` |
 | Test | `uv run pytest` |
 | CLI 실행 | `uv run vesper parse "<url>" --extract-only` |
-| 모델 조회 | `uv run vesper models <이름/slug>` — 사이트 실시간 카운트 + heritage 보유 + 크롤 추천 |
+| 모델 조회 | `uv run vesper models <이름/slug>` — 사이트 실시간 카운트 + heritage/premium(H) 보유 + 크롤 추천 |
 | cosplay.db 재생성 | `uv run python scripts/build_models_db.py` — data/*.tsv에서 (패키지 import 때문에 uv run 필수) |
 | Browser 설치 | `uv run playwright install chromium` — gofile 캡처용 번들 Chromium (ouo/misskon은 실제 Chrome 사용) |
 | 수집/다운로드 분리 | `uv run vesper crawl <url> --collect` 후 `uv run vesper dispatch` — 2-phase (Gotchas 참조) |

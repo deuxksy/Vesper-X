@@ -52,6 +52,22 @@ def test_record_download_stores_direct_url(db):
     assert row == ("https://content.hegre.com/films/x/x-2160p.mp4?v=1", "dispatched")
 
 
+def test_holding_by_model_aggregates(db):
+    """모델명 부분일치 보유 집계 - models 명령 조회용."""
+    m = db.upsert_model("Toree", "H")
+    g1 = db.upsert_gallery(m, "t1", "https://hegre.com/films/x", "H", "video")
+    g2 = db.upsert_gallery(m, "t2", "https://hegre.com/photos/y", "H", "photo")
+    db.record_download(g1, "https://hegre.com/films/x", "x.mp4")
+    db.record_download(g2, "https://hegre.com/photos/y", "y.zip")
+    rows = db.holding_by_model("toree")   # 대소문자 무관 부분일치
+    assert len(rows) == 1
+    assert rows[0]["name"] == "Toree"
+    assert rows[0]["videos"] == 1
+    assert rows[0]["photos"] == 1
+    assert rows[0]["last_at"] is not None
+    assert db.holding_by_model("없는모델") == []
+
+
 def test_migration_adds_direct_url_column(tmp_path):
     """구 스키마(컬럼 없음) DB를 열면 자동 마이그레이션된다 - 기존 데이터 보존."""
     import sqlite3

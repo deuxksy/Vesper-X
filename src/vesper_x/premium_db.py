@@ -122,6 +122,24 @@ class PremiumDB:
         return conn.execute(
             "SELECT 1 FROM downloads WHERE url = ?", (url,)).fetchone() is not None
 
+    def holding_by_model(self, name_like: str) -> list[dict]:
+        """모델명 부분일치(대소문자 무관) 보유 집계 - models 명령의 premium(H) 조회용."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT m.name,"
+            " SUM(g.type = 'video') AS videos,"
+            " SUM(g.type = 'photo') AS photos,"
+            " MAX(d.dispatched_at) AS last_at"
+            " FROM downloads d"
+            " JOIN galleries g ON d.gallery_id = g.id"
+            " JOIN models m ON g.model_id = m.id"
+            " WHERE m.name LIKE ? COLLATE NOCASE"
+            " GROUP BY m.name"
+            " ORDER BY m.name",
+            (f"%{name_like}%",),
+        ).fetchall()
+        return [dict(zip(("name", "videos", "photos", "last_at"), r)) for r in rows]
+
     def get_crawl_checkpoint(self, site: str) -> Optional[str]:
         conn = self._connect()
         row = conn.execute(

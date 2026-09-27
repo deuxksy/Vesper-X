@@ -469,13 +469,23 @@ def _live_heritage_counts(info: dict) -> dict:
 def models(
     query: str = typer.Argument(..., help="모델 이름/slug (예: zinieq, Byoru)"),
 ):
-    """모델 조회: 사이트별 실시간 보유수 + heritage 보유 + 크롤 사이트 추천."""
+    """모델 조회: 사이트별 실시간 보유수 + heritage/premium(H) 보유 + 크롤 사이트 추천."""
     registry = ModelRegistry()
     info = registry.lookup(query)
-    if info is None:
+    holdings = PremiumDB().holding_by_model(query)
+    if info is None and not holdings:
         console.print(f"[yellow]'{query}' 을(를) cosplay.db에서 찾을 수 없습니다. "
                       f"(data/cosplay.db 필요 - scripts/build_models_db.py)[/yellow]")
         raise typer.Exit(1)
+
+    if holdings:
+        console.print("[bold]premium (H) 보유[/bold]")
+        for h in holdings:
+            console.print(f"  [magenta]{h['name']}[/magenta]  영상 {h['videos']} / 사진 {h['photos']}"
+                          f"  (최근 dispatch {h['last_at'] or '-'})")
+
+    if info is None:
+        return
 
     config = load_config()
     mk_live = _live_misskon_count(info, proxy=config.proxy)
