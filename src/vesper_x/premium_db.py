@@ -127,6 +127,7 @@ class PremiumDB:
         conn = self._connect()
         rows = conn.execute(
             "SELECT m.name,"
+            " m.site,"
             " SUM(g.type = 'video') AS videos,"
             " SUM(g.type = 'photo') AS photos,"
             " MAX(d.dispatched_at) AS last_at"
@@ -134,11 +135,11 @@ class PremiumDB:
             " JOIN galleries g ON d.gallery_id = g.id"
             " JOIN models m ON g.model_id = m.id"
             " WHERE m.name LIKE ? COLLATE NOCASE"
-            " GROUP BY m.name"
+            " GROUP BY m.name, m.site"
             " ORDER BY m.name",
             (f"%{name_like}%",),
         ).fetchall()
-        return [dict(zip(("name", "videos", "photos", "last_at"), r)) for r in rows]
+        return [dict(zip(("name", "site", "videos", "photos", "last_at"), r)) for r in rows]
 
     def get_crawl_checkpoint(self, site: str) -> Optional[str]:
         conn = self._connect()

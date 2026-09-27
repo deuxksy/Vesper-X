@@ -153,3 +153,36 @@ def test_default_sites_contain_w4b():
     assert "watch4beauty.com" in sites
     assert sites["watch4beauty.com"].subdir == "W4B"
     assert sites["watch4beauty.com"].crawler == "w4b"
+
+
+# --- premium.db site 컬럼 (Task 6) ---
+from vesper_x.premium_db import PremiumDB
+
+
+def test_holding_by_model_includes_site(tmp_path):
+    db = PremiumDB(tmp_path / "premium.db")
+    model_id = db.upsert_model("Christy White", "W4B")
+    gallery_id = db.upsert_gallery(
+        model_id, "Quickie By The Pool",
+        "https://www.watch4beauty.com/updates/quickie-by-the-pool", "W4B", "photo")
+    db.record_download(
+        gallery_id, "https://www.watch4beauty.com/updates/quickie-by-the-pool")
+    rows = db.holding_by_model("christy")
+    assert rows[0]["site"] == "W4B"
+    assert rows[0]["videos"] == 0
+    assert rows[0]["photos"] == 1
+
+
+def test_holding_by_model_hegre_regression(tmp_path):
+    db = PremiumDB(tmp_path / "premium.db")
+    model_id = db.upsert_model("Ani", "H")
+    g1 = db.upsert_gallery(model_id, "Massage X",
+                           "https://hegre.com/films/massage-x", "H", "video")
+    g2 = db.upsert_gallery(model_id, "Serenity",
+                           "https://hegre.com/photos/serenity", "H", "photo")
+    db.record_download(g1, "https://hegre.com/films/massage-x")
+    db.record_download(g2, "https://hegre.com/photos/serenity")
+    rows = db.holding_by_model("ani")
+    assert rows[0]["site"] == "H"
+    assert rows[0]["videos"] == 1
+    assert rows[0]["photos"] == 1

@@ -487,9 +487,10 @@ def models(
         raise typer.Exit(1)
 
     if holdings:
-        console.print("[bold]premium (H) 보유[/bold]")
+        console.print("[bold]premium 보유[/bold]")
         for h in holdings:
-            console.print(f"  [magenta]{h['name']}[/magenta]  영상 {h['videos']} / 사진 {h['photos']}"
+            console.print(f"  [magenta]{h['name']}[/magenta]  {h['site']}  "
+                          f"영상 {h['videos']} / 사진 {h['photos']}"
                           f"  (최근 dispatch {h['last_at'] or '-'})")
 
     if info is None:
