@@ -42,6 +42,35 @@ def test_record_and_is_downloaded(db):
     db.record_download(g, "https://hegre.com/films/x", "x.mp4")  # 재시도 기록 안전
 
 
+def test_record_download_stores_direct_url(db):
+    """CDN 직링크 매핑 - 재크롤 없이 참조·재전송 근거로 사용."""
+    db.record_download(None, "https://hegre.com/films/x", "x.mp4",
+                       direct_url="https://content.hegre.com/films/x/x-2160p.mp4?v=1")
+    row = db._connect().execute(
+        "SELECT direct_url, status FROM downloads WHERE url = ?",
+        ("https://hegre.com/films/x",)).fetchone()
+    assert row == ("https://content.hegre.com/films/x/x-2160p.mp4?v=1", "dispatched")
+
+
+def test_migration_adds_direct_url_column(tmp_path):
+    """구 스키마(컬럼 없음) DB를 열면 자동 마이그레이션된다 - 기존 데이터 보존."""
+    import sqlite3
+    p = tmp_path / "premium.db"
+    conn = sqlite3.connect(p)
+    conn.execute("CREATE TABLE downloads (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                 "gallery_id INTEGER, url TEXT NOT NULL, filename TEXT, "
+                 "status TEXT DEFAULT 'pending', dispatched_at TEXT DEFAULT (datetime('now')), "
+                 "completed_at TEXT)")
+    conn.execute("INSERT INTO downloads (url, filename) VALUES ('https://hegre.com/films/old', 'old.mp4')")
+    conn.commit()
+    conn.close()
+    db = PremiumDB(p)
+    cols = [r[1] for r in db._connect().execute("PRAGMA table_info(downloads)").fetchall()]
+    assert "direct_url" in cols
+    assert db.is_downloaded("https://hegre.com/films/old")  # 기존 데이터 보존
+    db.close()
+
+
 def test_checkpoint_roundtrip(db):
     assert db.get_crawl_checkpoint("H") is None
     db.update_crawl_checkpoint("H", "2026-09-25T17:00", page_url="https://hegre.com/update/3")

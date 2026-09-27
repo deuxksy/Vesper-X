@@ -583,7 +583,8 @@ def run_hegre_crawl(url: Optional[str], model: Optional[str], new_only: bool,
                     ctype = "video" if m.direct_url.split("?")[0].endswith(".mp4") else "photo"
                     gallery_id = db.upsert_gallery(
                         model_id, ref.get("title") or ref["url"], m.file_page_url, "H", ctype)
-                    db.record_download(gallery_id, m.file_page_url, m.filename)
+                    db.record_download(gallery_id, m.file_page_url, m.filename,
+                                       direct_url=m.direct_url)
                 else:
                     console.print(f"[cyan]extract-only: {m.filename} - {m.direct_url}[/cyan]")
         except NotImplementedError:

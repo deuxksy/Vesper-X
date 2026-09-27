@@ -197,6 +197,10 @@ def test_run_hegre_crawl_dispatches_and_records(tmp_path, monkeypatch):
                     new_only=False, extract_only=False, limit=0,
                     config=_cfg(), db=db, crawler=crawler)
     assert db.is_downloaded("https://hegre.com/films/massage-x")
+    row = db._connect().execute(
+        "SELECT direct_url FROM downloads WHERE url = ?",
+        ("https://hegre.com/films/massage-x",)).fetchone()
+    assert row == ("https://content.hegre.com/films/ani-cyprus-holiday/ani-cyprus-holiday-2160p.mp4?d=attachment&v=1642515443",)
 
 
 def test_run_hegre_crawl_extract_only_does_not_record(tmp_path):

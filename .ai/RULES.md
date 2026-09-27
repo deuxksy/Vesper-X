@@ -21,7 +21,7 @@ Lint 도구는 미설정. 도입 시 이 표를 갱신한다.
 - `src/vesper_x/cli.py` — Typer entry. parse / crawl / clip / batch / models / dispatch
 - `src/vesper_x/extractors/` — Parser(misskon, cosplaytele, hegre) · Crawler(crawler) · Bypasser(ouo) · Resolver(mediafire, gofile)
 - `src/vesper_x/extractors/hegre.py` — `HegreCrawler`/`HegreParser` (프리미엄 인증 CDN, persistent Chrome profile)
-- `src/vesper_x/premium_db.py` — `PremiumDB`: 프리미엄 부류(H/W4B) 이력·체크포인트 (`~/.config/url-resolver/premium.db`)
+- `src/vesper_x/premium_db.py` — `PremiumDB`: 프리미엄 부류(H/W4B) 이력·체크포인트 + CDN 직링크 매핑(`downloads.direct_url`, dispatch 시 기록·aria2 역조회 backfill) (`~/.config/url-resolver/premium.db`)
 - `src/vesper_x/fetchers.py` — `BrowserFetcher` (Chrome ECH page fetch, `crawl`이 사용)
 - `src/vesper_x/dispatchers/aria2.py` — aria2p RPC 전송
 - `src/vesper_x/models.py` — `DownloadMetadata` 전송 단위

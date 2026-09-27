@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS downloads (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     gallery_id      INTEGER REFERENCES galleries(id),
     url             TEXT NOT NULL,
+    direct_url      TEXT,
     filename        TEXT,
     status          TEXT DEFAULT 'pending',
     dispatched_at   TEXT DEFAULT (datetime('now')),
@@ -67,6 +68,10 @@ class PremiumDB:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(self.db_path)
             self._conn.executescript(_SCHEMA)
+            # 기존 DB 마이그레이션 - direct_url 컬럼 (2026-09-27, CDN 직링크 매핑)
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(downloads)").fetchall()]
+            if "direct_url" not in cols:
+                self._conn.execute("ALTER TABLE downloads ADD COLUMN direct_url TEXT")
             self._conn.commit()
         return self._conn
 
@@ -104,11 +109,12 @@ class PremiumDB:
         return cur.lastrowid
 
     def record_download(self, gallery_id: Optional[int], url: str,
-                        filename: Optional[str] = None) -> None:
+                        filename: Optional[str] = None,
+                        direct_url: Optional[str] = None) -> None:
         conn = self._connect()
         conn.execute(
-            "INSERT OR REPLACE INTO downloads (gallery_id, url, filename, status) "
-            "VALUES (?, ?, ?, 'dispatched')", (gallery_id, url, filename))
+            "INSERT OR REPLACE INTO downloads (gallery_id, url, direct_url, filename, status) "
+            "VALUES (?, ?, ?, ?, 'dispatched')", (gallery_id, url, direct_url, filename))
         conn.commit()
 
     def is_downloaded(self, url: str) -> bool:
