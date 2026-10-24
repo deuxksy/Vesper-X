@@ -23,8 +23,9 @@ class CosplayteleParser(BaseExtractor):
 class CosplayteleCrawler:
     def extract_post_urls(self, html_content: str) -> list[str]:
         soup = BeautifulSoup(html_content, "html.parser")
+        container = soup.find(id="main") or soup.find("main") or soup
         post_urls = []
-        for a in soup.find_all("a", class_="plain", href=True):
+        for a in container.find_all("a", class_="plain", href=True):
             href = a["href"].strip()
             if "cosplaytele.com/" in href and not any(x in href for x in ["/tag/", "/category/", "/page/", "/explore-categories/"]):
                 if href not in post_urls:
@@ -33,8 +34,9 @@ class CosplayteleCrawler:
 
     def extract_pagination_urls(self, html_content: str) -> list[str]:
         soup = BeautifulSoup(html_content, "html.parser")
+        container = soup.find(id="main") or soup.find("main") or soup
         pages = []
-        for a_tag in soup.find_all("a", class_="page-number", href=True):
+        for a_tag in container.find_all("a", class_="page-number", href=True):
             href = a_tag["href"].strip()
             if href not in pages:
                 pages.append(href)

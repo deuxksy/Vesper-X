@@ -28,3 +28,21 @@ def test_cosplaytele_crawler_extract_post_urls():
     post_urls = crawler.extract_post_urls(html_content)
     assert "https://cosplaytele.com/eve-swimsuit-2/" in post_urls
     assert "https://cosplaytele.com/columbina-6/" in post_urls
+
+
+def test_cosplaytele_crawler_scoped_to_main():
+    html_content = '''
+    <html>
+      <body>
+        <div id="main">
+          <a href="https://cosplaytele.com/post-1/" class="plain">Post 1</a>
+        </div>
+        <div id="sidebar">
+          <a href="https://cosplaytele.com/unrelated-recent-post/" class="plain">Recent</a>
+        </div>
+      </body>
+    </html>
+    '''
+    crawler = CosplayteleCrawler()
+    post_urls = crawler.extract_post_urls(html_content)
+    assert post_urls == ["https://cosplaytele.com/post-1/"]
