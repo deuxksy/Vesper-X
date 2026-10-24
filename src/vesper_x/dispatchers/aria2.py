@@ -52,6 +52,40 @@ class Aria2Dispatcher:
                         break
         return count
 
+    def active_w4b_count(self) -> int:
+        """진행 중이거나 대기 중인 W4B 다운로드 수 - 30분 세션/토큰 만료 방어용."""
+        count = 0
+        for d in self.client.tell_active():
+            is_w4b = False
+            for f in d.get("files", []):
+                if "/W4B/" in f.get("path", ""):
+                    is_w4b = True
+                    break
+                for u in f.get("uris", []):
+                    if "watch4beauty.com" in u.get("uri", ""):
+                        is_w4b = True
+                        break
+                if is_w4b:
+                    break
+            if is_w4b:
+                count += 1
+
+        for d in self.client.tell_waiting(0, 100):
+            is_w4b = False
+            for f in d.get("files", []):
+                if "/W4B/" in f.get("path", ""):
+                    is_w4b = True
+                    break
+                for u in f.get("uris", []):
+                    if "watch4beauty.com" in u.get("uri", ""):
+                        is_w4b = True
+                        break
+                if is_w4b:
+                    break
+            if is_w4b:
+                count += 1
+        return count
+
     def status_summary(self) -> dict:
         """aria2 전체 상태 집계 - crawl 진행 중 가시화용."""
         counts = {"active": 0, "waiting": 0, "paused": 0, "complete": 0, "error": 0, "total": 0}

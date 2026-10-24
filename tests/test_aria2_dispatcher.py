@@ -176,3 +176,19 @@ def test_active_gofile_count():
         dispatcher = Aria2Dispatcher(AppConfig())
         assert dispatcher.active_gofile_count() == 2
 
+
+def test_active_w4b_count():
+    with patch("vesper_x.dispatchers.aria2.aria2p") as mock_aria2p:
+        client = mock_aria2p.Client.return_value
+        client.tell_active.return_value = [
+            {"files": [{"path": "/downloads/W4B/Model/set/2160.mp4", "uris": []}]},
+            {"files": [{"uris": [{"uri": "https://download.mediafire.com/file.rar"}]}]},
+        ]
+        client.tell_waiting.return_value = [
+            {"files": [{"uris": [{"uri": "https://www.watch4beauty.com/api/media/2026.zip"}]}]},
+            {"files": [{"uris": [{"uri": "https://mega.nz/4"}]}]},
+        ]
+        dispatcher = Aria2Dispatcher(AppConfig())
+        assert dispatcher.active_w4b_count() == 2
+
+

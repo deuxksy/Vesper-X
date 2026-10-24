@@ -223,3 +223,76 @@ def test_holding_by_model_hegre_regression(tmp_path):
     assert rows[0]["site"] == "H"
     assert rows[0]["videos"] == 1
     assert rows[0]["photos"] == 1
+
+
+def test_run_premium_crawl_w4b_waits_for_active_downloads(tmp_path, monkeypatch):
+    from vesper_x.cli import run_premium_crawl
+    from vesper_x.config import AppConfig, CredentialConfig
+    from vesper_x.models import DownloadMetadata
+
+    db = PremiumDB(tmp_path / "premium.db")
+
+    class FakeCrawler:
+        def __init__(self):
+            self.login_called = False
+
+        async def login(self):
+            self.login_called = True
+
+        async def collect(self, model_slug=None):
+            return [{"url": "https://www.watch4beauty.com/updates/set1", "title": "set1"}]
+
+        async def resolve(self, url):
+            return [DownloadMetadata(
+                direct_url="https://watch4beauty.com/media.mp4",
+                referer=url,
+                user_agent="UA",
+                filename="Model/set1/2160.mp4",
+                source_page=url,
+                models=["Model"],
+                file_page_url=url,
+            )]
+
+    class FakeDispatcher:
+        def __init__(self):
+            self.active_calls = 0
+            self.dispatched = []
+
+        def waiting_count(self):
+            return 0
+
+        def active_w4b_count(self):
+            # First check returns 1 (waiting), second check returns 0 (cleared)
+            self.active_calls += 1
+            return 1 if self.active_calls == 1 else 0
+
+        def status_summary(self):
+            return {"active": 1, "waiting": 0, "paused": 0, "complete": 0, "error": 0, "total": 1}
+
+        def format_status(self, s):
+            return "status"
+
+        def dispatch(self, m):
+            self.dispatched.append(m)
+            return "gid-123"
+
+    fake_crawler = FakeCrawler()
+    fake_dispatcher = FakeDispatcher()
+
+    monkeypatch.setattr("vesper_x.cli.Aria2Dispatcher", lambda cfg: fake_dispatcher)
+    monkeypatch.setattr("vesper_x.cli.time.sleep", lambda s: None)  # do not sleep in test
+
+    cfg = AppConfig(credentials={"w4b": CredentialConfig(username="u", password="p")})
+    run_premium_crawl(
+        site="w4b",
+        url="https://www.watch4beauty.com/updates/set1",
+        config=cfg,
+        db=db,
+        crawler=fake_crawler,
+    )
+
+    assert fake_crawler.login_called
+    assert fake_dispatcher.active_calls >= 2
+    assert len(fake_dispatcher.dispatched) == 1
+    assert db.is_downloaded("https://www.watch4beauty.com/updates/set1")
+

@@ -580,6 +580,12 @@ def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str]
                       "username/password를 추가한다[/bold red]")
         raise typer.Exit(1)
 
+    if site == "w4b" and hasattr(crawler, "login"):
+        try:
+            run_async(crawler.login())
+        except Exception as e:
+            console.print(f"[yellow]W4B 사전 로그인 시도 경고: {e}[/yellow]")
+
     if url:
         refs = [{"url": url, "title": url}]
     else:
@@ -593,6 +599,17 @@ def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str]
             console.print(f"[dim]skip (dispatched): {ref['url']}[/dim]")
             continue
         try:
+            # 대역 및 토큰 만료 방어: aria2 waiting 큐가 비어 있을 때만 진행한다.
+            while dispatcher and hasattr(dispatcher, "waiting_count") and int(dispatcher.waiting_count()) > 0:
+                console.print(f"[dim]aria2 대기 있음 [{dispatcher.format_status(dispatcher.status_summary())}] - 30초 대기...[/dim]")
+                time.sleep(30)
+
+            # W4B: 30분 세션/토큰 만료 방어를 위해 이전 세트 완료까지 대기 (순차 집중 다운로드)
+            if site == "w4b" and dispatcher and hasattr(dispatcher, "active_w4b_count"):
+                while dispatcher.active_w4b_count() > 0:
+                    console.print(f"[dim]W4B 다운로드 진행 중 [{dispatcher.format_status(dispatcher.status_summary())}] - 세트 완료까지 15초 대기...[/dim]")
+                    time.sleep(15)
+
             metadata_list = run_async(crawler.resolve(ref["url"]))
             if not metadata_list:
                 console.print(f"[yellow]다운로드 링크 없음: {ref['url']}[/yellow]")

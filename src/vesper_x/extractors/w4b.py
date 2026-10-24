@@ -198,6 +198,21 @@ class W4BCrawler:
                 page = context.pages[0] if context.pages else await context.new_page()
                 await page.goto(url, wait_until="domcontentloaded")
                 await self._dismiss_age_gate(page)
+                # 세션 만료로 로그아웃된 경우 자동 재로그인
+                if await page.locator("a[href*='/login']").count() > 0:
+                    creds = self.ensure_credentials()
+                    await page.goto(URLS["login"], wait_until="domcontentloaded")
+                    await self._dismiss_age_gate(page)
+                    await page.fill(SELECTORS["login_user"], creds.username)
+                    await page.fill(SELECTORS["login_pass"], creds.password)
+                    await page.evaluate("document.querySelector('form').requestSubmit()")
+                    try:
+                        await page.wait_for_load_state("networkidle")
+                    except Exception:
+                        pass
+                    await page.goto(url, wait_until="domcontentloaded")
+                    await self._dismiss_age_gate(page)
+
                 try:
                     # STARRING 섹션은 SPA 지연 렌더라 networkidle까지 대기해야
                     # 모델명을 안정적으로 추출한다 (2026-09-28 E2E 실측)
@@ -205,7 +220,8 @@ class W4BCrawler:
                 except Exception:
                     pass
                 try:
-                    trigger = page.get_by_role("link", name="Download", exact=True).first
+                    # 화면에 보이는 Download 버튼 클릭 (비가시 모바일 메뉴 링크 제외)
+                    trigger = page.locator("a[title='Download']:visible, a:has-text('Download'):visible").first
                     await trigger.click()
                     await page.wait_for_selector(SELECTORS["download_links"], timeout=10000)
                 except Exception:
