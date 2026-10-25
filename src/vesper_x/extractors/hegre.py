@@ -18,9 +18,11 @@ URLS = {
     "login": "https://www.hegre.com/login",       # 실측 2026-09-25 (form POST, CSRF)
     "model": "https://www.hegre.com/models/{slug}",   # 실측 2026-09-25
     "updates": "https://www.hegre.com",           # 신작: 홈페이지가 최신 films 노출
-    # 콘텐츠 경로 패턴 (실측 2026-09-25): films=video, photos=photo.
-    # collections(중복 큐레이션)/news/sexed는 제외
-    "content_path": r"/(films?|photos?)/[\w-]+",
+    "movies": "https://www.hegre.com/movies",     # 전체 영화 (films_page 페이징)
+    "photos": "https://www.hegre.com/photos",     # 전체 사진 (galleries_page 페이징)
+    # 콘텐츠 경로 패턴 (실측 2026-09-25, 2026-10-24): films/massage/sexed=video, photos=photo.
+    # collections(중복 큐레이션)/news는 제외
+    "content_path": r"/(films?|photos?|massage|sexed)/[\w-]+",
 }
 
 SELECTORS = {
@@ -42,7 +44,7 @@ _PIXELS_RE = re.compile(r"(\d{4,5})\s*px", re.IGNORECASE)
 
 # 정본 www 페이지의 콘텐츠 경로만 - CDN 포스터(pp.hegre.com)·정렬 링크(/models/films/...) 제외
 WWW_HOSTS = {"hegre.com", "www.hegre.com"}
-_CONTENT_PATH_FULL_RE = re.compile(r"/(?:films?|photos?)/[\w-]+/?")
+_CONTENT_PATH_FULL_RE = re.compile(r"/(?:films?|photos?|massage|sexed)/[\w-]+/?")
 
 
 def _content_ref(a, base_url: str) -> Optional[dict]:
@@ -61,8 +63,8 @@ def _content_ref(a, base_url: str) -> Optional[dict]:
 class HegreParser:
     @staticmethod
     def content_type(url: str) -> str:
-        """/films → 'video', /photos(그 외) → 'photo' (실측 2026-09-25)."""
-        if re.search(r"/films?/", urlparse(url).path):
+        """/films, /massage, /sexed → 'video', /photos(그 외) → 'photo'."""
+        if re.search(r"/(?:films?|massage|sexed)/", urlparse(url).path):
             return "video"
         return "photo"
 
@@ -197,10 +199,39 @@ class HegreCrawler:
         return refs
 
     @staticmethod
+    def is_content_url(url: str) -> bool:
+        """단일 콘텐츠 URL(/films/<slug> 또는 /photos/<slug>)인지 판정."""
+        parsed = urlparse(url)
+        if parsed.hostname not in WWW_HOSTS:
+            return False
+        return bool(_CONTENT_PATH_FULL_RE.fullmatch(parsed.path))
+
+    @staticmethod
     def extract_next_page_url(html: str, base_url: str) -> Optional[str]:
         soup = BeautifulSoup(html, "html.parser")
         a = soup.select_one(SELECTORS["next_page"])
-        return urljoin(base_url, a["href"]) if a and a.get("href") else None
+        if a and a.get("href"):
+            return urljoin(base_url, a["href"])
+
+        # 무한 스크롤 페이징 (실측 2026-10-24: .infinite-scroll-pagination[data-param-name][data-total-pages])
+        pag = soup.select_one(".infinite-scroll-pagination")
+        if pag:
+            param = pag.get("data-param-name")
+            total_pages_str = pag.get("data-total-pages")
+            if param and total_pages_str:
+                try:
+                    total_pages = int(total_pages_str)
+                    parsed = urlparse(base_url)
+                    import urllib.parse
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    curr_page = int(qs.get(param, [1])[0])
+                    if curr_page < total_pages:
+                        qs[param] = [str(curr_page + 1)]
+                        new_query = urllib.parse.urlencode(qs, doseq=True)
+                        return urllib.parse.urlunparse(parsed._replace(query=new_query))
+                except (ValueError, TypeError):
+                    pass
+        return None
 
     # --- resolve (dispatch 직전 호출 — spec 4.3) ---
 
@@ -236,14 +267,20 @@ class HegreCrawler:
     # --- Playwright 세션 (골격 — selector는 Task 6 실측에서 확정) ---
 
     async def collect(self, model_slug: Optional[str] = None,
+                      start_url: Optional[str] = None,
                       max_pages: int = 10) -> list[dict]:
-        """모델/신작 목록 순회.
+        """모델/신작/목록 순회.
 
         모델 모드는 본인 콘텐츠 섹션(#films/#galleries-wrapper)만 — 페이지 전체를 긁으면
         사이트 신작 노이즈가 섞인다 (2026-09-27 toree 실측).
+        start_url이 주어지면 해당 URL(예: /movies, /photos)부터 순회한다.
         """
-        base = (URLS["model"].format(slug=model_slug) if model_slug
-                else URLS["updates"])
+        if start_url:
+            base = start_url
+        elif model_slug:
+            base = URLS["model"].format(slug=model_slug)
+        else:
+            base = URLS["updates"]
         refs: list[dict] = []
         url: Optional[str] = base
         for _ in range(max_pages):

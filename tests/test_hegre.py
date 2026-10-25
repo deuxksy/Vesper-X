@@ -63,6 +63,8 @@ def test_best_zip_single_option():
 
 def test_content_type_from_url():
     assert HegreParser.content_type("https://hegre.com/films/massage-x") == "video"
+    assert HegreParser.content_type("https://hegre.com/massage/intense-orgasmic-massage") == "video"
+    assert HegreParser.content_type("https://hegre.com/sexed/tantric-sex-introduction") == "video"
     assert HegreParser.content_type("https://hegre.com/photos/serenity") == "photo"
 
 
@@ -389,3 +391,45 @@ async def test_resolve_wrapper_fetches_and_parses(monkeypatch):
     metas = await crawler.resolve("https://hegre.com/films/massage-x")
     assert metas[0].direct_url == ("https://content.hegre.com/films/ani-cyprus-holiday/"
                                    "ani-cyprus-holiday-2160p.mp4?d=attachment&v=1642515443")
+
+
+def test_extract_next_page_url_infinite_scroll():
+    html = '<div class="infinite-scroll-pagination" data-param-name="films_page" data-total-pages="21">Scroll</div>'
+    assert HegreCrawler.extract_next_page_url(html, "https://www.hegre.com/movies") == "https://www.hegre.com/movies?films_page=2"
+    assert HegreCrawler.extract_next_page_url(html, "https://www.hegre.com/movies?films_page=2") == "https://www.hegre.com/movies?films_page=3"
+    assert HegreCrawler.extract_next_page_url(html, "https://www.hegre.com/movies?films_page=21") is None
+
+
+def test_is_content_url():
+    assert HegreCrawler.is_content_url("https://www.hegre.com/films/massage-x")
+    assert HegreCrawler.is_content_url("https://www.hegre.com/photos/serenity")
+    assert not HegreCrawler.is_content_url("https://www.hegre.com/movies")
+    assert not HegreCrawler.is_content_url("https://www.hegre.com/photos")
+    assert not HegreCrawler.is_content_url("https://evil.example.com/films/x")
+
+
+def test_run_premium_crawl_listing_url_invokes_collect(tmp_path, monkeypatch):
+    from vesper_x.cli import run_premium_crawl
+    from vesper_x.premium_db import PremiumDB
+    db = PremiumDB(tmp_path / "premium.db")
+
+    called = {}
+
+    class FakeCrawler:
+        def is_content_url(self, url):
+            return False
+
+        async def collect(self, start_url=None, max_pages=10):
+            called["start_url"] = start_url
+            called["max_pages"] = max_pages
+            return [{"url": "https://www.hegre.com/films/item-1", "title": "Item 1"}]
+
+        async def resolve(self, url):
+            return []
+
+    cfg = AppConfig(credentials={"hegre": CredentialConfig("user", "pass")})
+    run_premium_crawl(site="hegre", url="https://www.hegre.com/movies", pages=3,
+                      config=cfg, db=db, crawler=FakeCrawler())
+    assert called["start_url"] == "https://www.hegre.com/movies"
+    assert called["max_pages"] == 3
+

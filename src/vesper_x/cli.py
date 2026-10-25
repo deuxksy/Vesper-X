@@ -562,6 +562,7 @@ PREMIUM_SITES = {
 
 def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str] = None,
                       new_only: bool = False, extract_only: bool = False, limit: int = 0,
+                      pages: int = 0,
                       config: Optional[AppConfig] = None,
                       db: Optional[PremiumDB] = None,
                       crawler=None) -> None:
@@ -586,10 +587,13 @@ def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str]
         except Exception as e:
             console.print(f"[yellow]W4B 사전 로그인 시도 경고: {e}[/yellow]")
 
-    if url:
+    is_content = getattr(crawler, "is_content_url", lambda u: True)(url) if url else False
+    if url and is_content:
         refs = [{"url": url, "title": url}]
+    elif url:
+        refs = run_async(crawler.collect(start_url=url, max_pages=pages or 10))
     else:
-        refs = run_async(crawler.collect(model_slug=model))
+        refs = run_async(crawler.collect(model_slug=model, max_pages=pages or 10))
     if limit:
         refs = refs[:limit]
 
@@ -770,10 +774,10 @@ def crawl(
     """Crawl category or tag listing across multiple pages and process all posts."""
     if site == "w4b" or (url and _is_w4b_url(url)):
         return run_premium_crawl(site="w4b", url=url, model=model, new_only=new,
-                                 extract_only=extract_only, limit=limit)
+                                 extract_only=extract_only, limit=limit, pages=pages)
     if site == "hegre" or (url and _is_hegre_url(url)):
         return run_premium_crawl(site="hegre", url=url, model=model, new_only=new,
-                                 extract_only=extract_only, limit=limit)
+                                 extract_only=extract_only, limit=limit, pages=pages)
     if not url:
         console.print("[red]URL이 필요하다 (--site hegre 제외)[/red]")
         raise typer.Exit(1)
