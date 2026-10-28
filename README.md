@@ -112,6 +112,7 @@ uv run vesper dispatch                                             # 나중에 �
 uv run vesper crawl --site hegre --new        # 신작 (체크포인트)
 uv run vesper crawl --site hegre --model ani  # 모델 전체
 uv run vesper crawl --site w4b --model christy-white  # W4B 모델 전체
+uv run vesper crawl "https://www.hegre.com/movies" --site hegre --pages 3  # 영화 목록 크롤링
 ```
 
 ### 6. 모델 조회 (사이트 보유량 + 내 아카이브 현황)
@@ -129,7 +130,7 @@ uv run vesper models zinieq
 | **🚀 Tutorials (튜토리얼)**     | [📦 설치 및 시작하기](#-설치)                                                         | 패키지 동기화 및 단축링크 우회 브라우저 초기 설정                                                             |
 | **🛠️ How-To Guides (가이드)** | [💻 핵심 사용법](#-사용법)                                                            | 단일 파싱, 태그별 연속 크롤링, 클립보드 즉시 처리 절차                                                        |
 | **📖 Reference (참고자료)**     | [CLI 명령어 명세](#-사용법)                                                           | `vesper` CLI 서브커맨드(`parse`, `crawl`, `clip`, `batch`, `models`, `dispatch`, `sync`) 규격 |
-| **💡 Explanation (설명/원리)**  | [🏗️ 아키텍처 및 파이프라인](#️-아키텍처-및-파이프라인)[🗺️ ROADMAP.md](ROADMAP.md) | 프록시/Chrome 우회 파이프라인 동작 원리 및 중장기 확장 로드맵                                                 |
+| **💡 Explanation (설명/원리)**  | [🏗️ 아키텍처 및 파이프라인](#️-아키텍처-및-파이프라인), [🗺️ ROADMAP.md](ROADMAP.md) | 프록시/Chrome 우회 파이프라인 동작 원리 및 중장기 확장 로드맵                                                 |
 
 ---
 
