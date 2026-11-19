@@ -70,5 +70,5 @@ Pipeline: CLI → BrowserFetcher(proxy+Chrome) → Crawler → Parser → Bypass
 - **Hegre `/models/films/<slug>`는 실제 라우트가 아니다** — 모델 필름 탭 URL로 보이지만 접속 시 사이트 전체 신작 목록(74건)이 돌아온다. 모델 본인 목록은 `/models/<slug>`의 `#films-wrapper`만이 Source of Truth다 (2026-09-27 toree 실측)
 - **W4B 크롤러** (2026-09-28 실측): 모든 세트의 정본은 `/updates/<slug>`(films/galleries는 필터 목록, stories는 에디토리얼 제외). 다운로드 패널(ZIP+최고해상도 mp4)은 툴바 Download 클릭 후 JS가 href를 채운다 — 정적 fetch 불가, Playwright 상호작용 필수
 - **W4B 연령 게이트**가 포인터를 가로채 click이 무시된다 — 로그인 제출은 JS requestSubmit, 게이트는 `_dismiss_age_gate`가 자동 수락(수락 쿠키는 w4b_profile에 유지)
-- **W4B 세션 시딩**: login()이 CLI 어디서도 자동 호출되지 않으므로 신규 머신/쿠키 만료 시 login()을 먼저 실행한다. credentials는 로컬 config `[credentials.w4b]`
+- **W4B 세션 시딩**: premium crawl 시작 시 login()을 시도하고, 콘텐츠 resolve 중 세션 만료가 감지되면 재로그인한다. credentials는 로컬 config `[credentials.w4b]`
 - **W4B 겸용 세트(ZIP+mp4) premium.db 기록**: gallery는 `url#type` 행 분리, downloads는 파일별 키(`#type` 접미). is_downloaded는 LIKE로 세트 단위 skip 유지. STARRING 앵커는 빈 이미지 앵커가 먼저 오고 mp4 패널 href는 상대경로(urljoin 필수)

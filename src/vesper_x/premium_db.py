@@ -122,9 +122,14 @@ class PremiumDB:
             "VALUES (?, ?, ?, ?, 'dispatched')", (gallery_id, url, direct_url, filename))
         conn.commit()
 
-    def is_downloaded(self, url: str) -> bool:
+    def is_downloaded(self, url: str, content_type: Optional[str] = None) -> bool:
         """세트 단위 skip 판정 - type 접미(#photo/#video) 행도 같은 세트로 본다."""
         conn = self._connect()
+        if content_type:
+            return conn.execute(
+                "SELECT 1 FROM downloads d LEFT JOIN galleries g ON d.gallery_id = g.id "
+                "WHERE d.url = ? OR (d.url = ? AND g.type = ?)",
+                (f"{url}#{content_type}", url, content_type)).fetchone() is not None
         return conn.execute(
             "SELECT 1 FROM downloads WHERE url = ? OR url LIKE ? || '#%'",
             (url, url)).fetchone() is not None

@@ -189,6 +189,40 @@ def _cfg():
     return AppConfig(credentials={"hegre": CredentialConfig("u", "p")})
 
 
+def test_premium_type_filter_preserves_other_type_for_w4b(tmp_path, monkeypatch):
+    from vesper_x.models import DownloadMetadata
+
+    url = "https://www.watch4beauty.com/updates/set"
+    db = PremiumDB(tmp_path / "premium.db")
+    sent = []
+
+    class Crawler:
+        async def resolve(self, ref):
+            return [DownloadMetadata(f"https://cdn.example/file.{ext}", ref, "ua", ext, ref,
+                                     file_page_url=ref) for ext in ("zip", "mp4")]
+
+    class Dispatcher:
+        def dispatch(self, metadata):
+            sent.append(metadata.filename)
+            return "gid"
+
+    monkeypatch.setattr("vesper_x.cli.Aria2Dispatcher", lambda cfg: Dispatcher())
+    config = AppConfig(credentials={"w4b": CredentialConfig("u", "p")})
+    for kind in ("video", "photo", "all"):
+        run_premium_crawl("w4b", url=url, config=config, db=db, crawler=Crawler(), content_type=kind)
+    assert sent == ["mp4", "zip"]
+    assert db.is_downloaded(url, "video")
+    assert db.is_downloaded(url, "photo")
+
+
+def test_hegre_type_filter_skips_other_type_before_fetch(tmp_path, capsys):
+    url = "https://hegre.com/photos/example"
+    crawler = FakeCrawler({})
+    run_premium_crawl("hegre", url=url, config=_cfg(), db=PremiumDB(tmp_path / "premium.db"),
+                      crawler=crawler, extract_only=True, content_type="video")
+    assert "처리 실패" not in capsys.readouterr().out
+
+
 def test_run_premium_crawl_dispatches_and_records(tmp_path, monkeypatch):
     db = PremiumDB(tmp_path / "premium.db")
     crawler = FakeCrawler({

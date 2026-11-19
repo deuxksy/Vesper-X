@@ -109,11 +109,15 @@ uv run vesper dispatch                                             # 나중에 �
 ### 5. 프리미엄 사이트 크롤링 (Hegre·W4B)
 
 ```bash
-uv run vesper crawl --site hegre --new        # 신작 (체크포인트)
+uv run vesper crawl --site hegre --new        # 신작 목록 크롤 및 체크포인트 기록
 uv run vesper crawl --site hegre --model ani  # 모델 전체
 uv run vesper crawl --site w4b --model christy-white  # W4B 모델 전체
+uv run vesper crawl --site hegre --new --type video  # 영상만
+uv run vesper crawl --site w4b --new --type photo    # 사진만
 uv run vesper crawl "https://www.hegre.com/movies" --site hegre --pages 3  # 영화 목록 크롤링
 ```
+
+`--type`은 `video`, `photo`, `all`을 지원하며 기본값은 `all`입니다. W4B 겸용 세트는 파일 유형별로 전송 이력을 관리합니다.
 
 ### 6. 모델 조회 (사이트 보유량 + 내 아카이브 현황)
 

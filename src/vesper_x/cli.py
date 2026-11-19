@@ -19,7 +19,7 @@ from vesper_x.dispatchers.aria2 import Aria2Dispatcher
 from vesper_x.extractors.crawler import CategoryCrawler
 from vesper_x.extractors.cosplaytele import CosplayteleParser, CosplayteleCrawler
 from vesper_x.extractors.gofile import GofileResolver
-from vesper_x.extractors.hegre import HegreCrawler
+from vesper_x.extractors.hegre import HegreCrawler, HegreParser
 from vesper_x.extractors.w4b import W4BCrawler
 from vesper_x.extractors.mediafire import MediafireResolver
 from vesper_x.extractors.misskon import MisskonParser
@@ -565,7 +565,7 @@ def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str]
                       pages: int = 0,
                       config: Optional[AppConfig] = None,
                       db: Optional[PremiumDB] = None,
-                      crawler=None) -> None:
+                      crawler=None, content_type: str = "all") -> None:
     """프리미엄 크롤 공용 루프 — site가 crawler/site 코드/creds 키를 결정한다.
 
     목록 수집은 URL만, CDN resolve는 dispatch 직전 (spec 4.3).
@@ -599,7 +599,10 @@ def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str]
 
     dispatcher = None if extract_only else Aria2Dispatcher(config)
     for ref in refs:
-        if db.is_downloaded(ref["url"]):
+        if site == "hegre" and content_type != "all" and HegreCrawler.is_content_url(ref["url"]):
+            if HegreParser.content_type(ref["url"]) != content_type:
+                continue
+        if content_type != "all" and db.is_downloaded(ref["url"], content_type):
             console.print(f"[dim]skip (dispatched): {ref['url']}[/dim]")
             continue
         try:
@@ -619,6 +622,9 @@ def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str]
                 console.print(f"[yellow]다운로드 링크 없음: {ref['url']}[/yellow]")
                 continue
             for m in metadata_list:
+                ctype = "video" if urllib.parse.urlparse(m.direct_url).path.lower().endswith(".mp4") else "photo"
+                if (content_type != "all" and ctype != content_type) or db.is_downloaded(ref["url"], ctype):
+                    continue
                 if dispatcher:
                     gid = dispatcher.dispatch(m)
                     console.print(f"[bold green]Dispatched to aria2[/bold green] "
@@ -627,7 +633,6 @@ def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str]
                     # 오염시키지 않는다 (기존 handle_results와 동일 의미론)
                     model_name = m.models[0] if m.models else "Unknown"
                     model_id = db.upsert_model(model_name, site_code)
-                    ctype = "video" if m.direct_url.split("?")[0].endswith(".mp4") else "photo"
                     gallery_id = db.upsert_gallery(
                         model_id, ref.get("title") or ref["url"], m.file_page_url, site_code, ctype)
                     # downloads 키는 파일별 분리(#type) - 겸용 세트의 두 번째 파일이
@@ -770,14 +775,19 @@ def crawl(
     model: Optional[str] = typer.Option(None, "--model", help="모델 전체 크롤 (hegre)"),
     new: bool = typer.Option(False, "--new", help="신작 크롤 (체크포인트 기반)"),
     collect: bool = typer.Option(False, "--collect", help="수집만: dispatch_log 큐에 저장 (dispatch는 별도 커맨드)"),
+    content_type: str = typer.Option("all", "--type", help="프리미엄 콘텐츠 유형: all, video, photo"),
 ):
     """Crawl category or tag listing across multiple pages and process all posts."""
+    if content_type not in ("all", "video", "photo"):
+        raise typer.BadParameter("all, video, photo 중 하나를 선택하세요", param_hint="--type")
     if site == "w4b" or (url and _is_w4b_url(url)):
         return run_premium_crawl(site="w4b", url=url, model=model, new_only=new,
-                                 extract_only=extract_only, limit=limit, pages=pages)
+                                 extract_only=extract_only, limit=limit, pages=pages, content_type=content_type)
     if site == "hegre" or (url and _is_hegre_url(url)):
         return run_premium_crawl(site="hegre", url=url, model=model, new_only=new,
-                                 extract_only=extract_only, limit=limit, pages=pages)
+                                 extract_only=extract_only, limit=limit, pages=pages, content_type=content_type)
+    if content_type != "all":
+        raise typer.BadParameter("--type은 hegre 또는 w4b에서만 사용할 수 있습니다", param_hint="--type")
     if not url:
         console.print("[red]URL이 필요하다 (--site hegre 제외)[/red]")
         raise typer.Exit(1)
