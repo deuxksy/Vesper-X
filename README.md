@@ -44,7 +44,7 @@ graph TD
     end
 
     subgraph PREM[프리미엄 파이프라인 - Hegre]
-        P1[run_hegre_crawl - site 옵션 진입]
+        P1[run_premium_crawl - site 옵션 진입]
         P1 --> P2[HegreCrawler - persistent Chrome profile 인증]
         P1 --> P3[collect - 모델 전체/신작 목록]
         P3 --> P4[fetch - 인증 세션 페이지 HTML]

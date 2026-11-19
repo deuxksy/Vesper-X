@@ -225,6 +225,20 @@ def test_holding_by_model_hegre_regression(tmp_path):
     assert rows[0]["photos"] == 1
 
 
+def test_w4b_new_collect_uses_supported_arguments(tmp_path):
+    from vesper_x.cli import run_premium_crawl
+    from vesper_x.config import AppConfig, CredentialConfig
+
+    class Crawler:
+        async def collect(self, model_slug=None):
+            assert model_slug is None
+            return []
+
+    run_premium_crawl("w4b", new_only=True, extract_only=True,
+                      config=AppConfig(credentials={"w4b": CredentialConfig("u", "p")}),
+                      db=PremiumDB(tmp_path / "premium.db"), crawler=Crawler())
+
+
 def test_run_premium_crawl_w4b_waits_for_active_downloads(tmp_path, monkeypatch):
     from vesper_x.cli import run_premium_crawl
     from vesper_x.config import AppConfig, CredentialConfig

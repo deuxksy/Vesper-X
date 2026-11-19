@@ -592,6 +592,8 @@ def run_premium_crawl(site: str, url: Optional[str] = None, model: Optional[str]
         refs = [{"url": url, "title": url}]
     elif url:
         refs = run_async(crawler.collect(start_url=url, max_pages=pages or 10))
+    elif site == "w4b":
+        refs = run_async(crawler.collect(model_slug=model))
     else:
         refs = run_async(crawler.collect(model_slug=model, max_pages=pages or 10))
     if limit:
